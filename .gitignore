@@ -1,0 +1,45 @@
+# Python
+Backend/venv/
+Backend/__pycache__/
+Backend/*.pyc
+Backend/*.pyo
+Backend/*.pyd
+Backend/.pytest_cache/
+Backend/.coverage
+Backend/htmlcov/
+Backend/.env
+
+# Node.js (Frontend/Expo)
+Frontend/node_modules/
+Frontend/.expo/
+Frontend/dist/
+Frontend/npm-debug.log*
+Frontend/yarn-debug.log*
+Frontend/yarn-error.log*
+Frontend/.env.local
+Frontend/.env.development.local
+Frontend/.env.test.local
+Frontend/.env.production.local
+
+# Expo Router
+Frontend/.expo-router/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Misc
+*.log
+scratch/
+temp/
