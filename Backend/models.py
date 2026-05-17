@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Integer, Boolean, Enum as SQLEnum, Date
+from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Integer, Boolean, Enum as SQLEnum, Date, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -118,3 +118,20 @@ class Alert(Base):
     message = Column(String, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class RefreshToken(Base):
+    """
+    Registro de refresh tokens para la estrategia rotate + blacklist.
+    Cuando se usa un refresh token, se revoca (revoked=True) y se emite uno nuevo.
+    """
+    __tablename__ = "refresh_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    jti = Column(String(36), unique=True, nullable=False, index=True)  # JWT ID único
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="refresh_tokens")
