@@ -56,8 +56,13 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
     Registra un nuevo usuario con rol PACIENTE.
     El rol puede ser cambiado posteriormente por un administrador.
     """
+    # Normalización de datos de entrada
+    clean_email = data.email.strip().lower()
+    clean_first_name = data.first_name.strip().title()
+    clean_last_name = data.last_name.strip().title()
+
     # Verificar email único
-    existing = db.query(models.User).filter(models.User.email == data.email).first()
+    existing = db.query(models.User).filter(models.User.email == clean_email).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -72,10 +77,10 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         )
 
     user = models.User(
-        email=data.email,
+        email=clean_email,
         password_hash=hash_password(data.password),
-        first_name=data.first_name,
-        last_name=data.last_name,
+        first_name=clean_first_name,
+        last_name=clean_last_name,
         role=models.UserRole.PACIENTE,  # Siempre PACIENTE en registro público
     )
     db.add(user)
@@ -98,7 +103,8 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     """
     Autentica al usuario y retorna access_token (15 min) + refresh_token (7 días).
     """
-    user = db.query(models.User).filter(models.User.email == data.email).first()
+    clean_email = data.email.strip().lower()
+    user = db.query(models.User).filter(models.User.email == clean_email).first()
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -39,7 +39,12 @@ class User(Base):
     last_name = Column(String(100), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    patient_profile = relationship("PatientProfile", back_populates="user", uselist=False)
+    patient_profile = relationship(
+        "PatientProfile", 
+        back_populates="user", 
+        uselist=False,
+        foreign_keys="PatientProfile.user_id"
+    )
 
 class Food(Base):
     __tablename__ = "foods"
@@ -57,6 +62,19 @@ class PatientProfile(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     caregiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     date_of_birth = Column(Date, nullable=False)
+    
+    # Nuevos campos médicos detallados clave para el diagnóstico
+    gender = Column(String(50), nullable=True)
+    weight_kg = Column(DECIMAL(5, 2), nullable=True)
+    height_cm = Column(DECIMAL(5, 2), nullable=True)
+    diabetes_type = Column(String(100), default="Tipo 2", nullable=True)
+    diagnosis_year = Column(Integer, nullable=True)
+    last_hba1c = Column(DECIMAL(4, 2), nullable=True)
+    medications = Column(Text, nullable=True)
+    allergies = Column(Text, nullable=True)
+    activity_level = Column(String(100), nullable=True)
+    medical_history = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -107,6 +125,9 @@ class IntakeLog(Base):
     food_id = Column(UUID(as_uuid=True), ForeignKey("foods.id", ondelete="RESTRICT"))
     meal_type = Column(SQLEnum(MealType), nullable=False)
     portion_size_g = Column(DECIMAL(6, 2), nullable=False)
+    image_base64 = Column(Text, nullable=True)
+    doctor_assessment = Column(String(50), nullable=True)  # "CORRECTA" o "INCORRECTA"
+    doctor_comment = Column(Text, nullable=True)  # Comentarios/observaciones específicas del doctor
     consumed_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Alert(Base):
@@ -135,3 +156,40 @@ class RefreshToken(Base):
     revoked_at = Column(DateTime, nullable=True)
 
     user = relationship("User", backref="refresh_tokens")
+
+
+class DoctorRecommendation(Base):
+    """
+    Recomendaciones médicas y reglas de IA específicas dadas por un doctor (cuidador) para un paciente.
+    """
+    __tablename__ = "doctor_recommendations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), unique=True, nullable=False)
+    ai_rules = Column(Text, nullable=True)  # Reglas/restricciones específicas para la IA
+    recommendations = Column(Text, nullable=True)  # Consejos médicos generales
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    patient = relationship("PatientProfile", backref="doctor_recommendation")
+
+
+class MalaiseIncident(Base):
+    """
+    Registros de dolor, incidencias, malestares y consultas directas al doctor por parte del paciente.
+    """
+    __tablename__ = "malaise_incidents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), nullable=False)
+    
+    description = Column(String(500), nullable=False)  # ej: "Fuerte dolor de cabeza y visión borrosa"
+    pain_level = Column(Integer, nullable=True)  # Escala 1 al 10
+    
+    doctor_question = Column(String(500), nullable=True)  # Consulta o petición de consejo directo
+    doctor_response = Column(String(500), nullable=True)  # Respuesta / consejo del doctor
+    
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    responded_at = Column(DateTime, nullable=True)
+
+    patient = relationship("PatientProfile", backref="malaise_incidents")
+

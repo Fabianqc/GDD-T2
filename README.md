@@ -90,3 +90,31 @@ npm start
 * **Celular**: Escanea el código QR que se muestra en la terminal usando la app gratuita **Expo Go** en tu smartphone (Android o iOS).
 
 > 🔐 **Tecnología de Almacenamiento**: La app detecta automáticamente la plataforma. Usa `localStorage` de alto rendimiento cuando se ejecuta en navegadores web y el llavero cifrado de hardware seguro (`SecureStore`) cuando se compila en dispositivos móviles Android o iOS.
+
+### 🛠️ Desarrollo Libre de Restricciones
+
+Durante la etapa de desarrollo, puedes eliminar cualquier restricción física o de software siguiendo estos dos consejos:
+
+#### 1. Iniciar sin restricciones de Red o Conectividad (Modo Túnel + Limpiar Caché)
+Si tienes problemas para conectar el celular con la computadora debido a cortafuegos de Windows, redes Wi-Fi públicas o de oficina, o si la consola de Metro tiene algún bug de caché:
+```cmd
+cd /d d:\proyectos\GDD-T2\Frontend
+npx expo start --tunnel --clear
+```
+* Esto creará una URL pública segura a través de internet, salteándose todas las restricciones del router local, y limpiará la memoria de compilación para arrancar desde cero.
+
+#### 2. Diseñar pantallas libremente sin Loguearte (Bypasear el Login Obligatorio)
+La aplicación cuenta con una compuerta de autenticación (`AuthGate`) que te redirige obligatoriamente al login si no has iniciado sesión. Para desactivarla temporalmente mientras creas interfaces de usuario:
+1. Abre el archivo **`Frontend/app/_layout.tsx`**.
+2. Ve al componente `AuthGate` (líneas 18-29) y comenta las líneas del condicional `useEffect`:
+   ```typescript
+   useEffect(() => {
+     if (isLoading) return;
+     // Comenta estas líneas para quitar el login obligatorio en desarrollo:
+     // if (!isAuthenticated) {
+     //   router.replace('/(auth)/login');
+     // }
+   }, [isAuthenticated, isLoading]);
+   ```
+3. Guarda el archivo y podrás navegar a cualquier pantalla directamente sin restricciones de sesión. *(Recuerda descomentarlo antes de pasar a producción).*
+

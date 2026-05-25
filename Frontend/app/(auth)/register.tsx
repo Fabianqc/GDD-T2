@@ -328,10 +328,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 10,
-    shadowColor: '#00C9A7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#00C9A7',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 10,
+      },
+      web: {
+        // @ts-ignore
+        boxShadow: '0px 4px 10px rgba(0, 201, 167, 0.4)',
+      },
+      default: {},
+    }),
   },
   logoHalo: {
     position: 'absolute',
@@ -439,10 +448,19 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     elevation: 8,
-    shadowColor: '#00C9A7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#00C9A7',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+      },
+      web: {
+        // @ts-ignore
+        boxShadow: '0px 4px 10px rgba(0, 201, 167, 0.35)',
+      },
+      default: {},
+    }),
   },
   registerBtnGradient: {
     height: 54,
