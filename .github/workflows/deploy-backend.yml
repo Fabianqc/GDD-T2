@@ -31,13 +31,18 @@ jobs:
             cd ~/GDD-T2
             git pull origin main
 
-            echo "📦 Actualizando dependencias de Python..."
+            echo "📦 Verificando entorno virtual y dependencias..."
             cd ~/GDD-T2/Backend
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
 
             echo "🔄 Reiniciando servicio en PM2..."
+            export PATH=$PATH:/usr/local/bin:~/.nvm/versions/node/$(node -v 2>/dev/null)/bin:~/.npm-global/bin
             pm2 restart gdd-t2-backend || pm2 start ecosystem.config.js
+            pm2 save
 
             echo "✅ ¡Despliegue de Backend completado exitosamente!"
