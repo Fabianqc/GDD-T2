@@ -3,16 +3,28 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 
-from .. import models
-from ..database import get_db
-from ..auth import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    get_current_user,
-)
+try:
+    from .. import models
+    from ..database import get_db
+    from ..auth import (
+        hash_password,
+        verify_password,
+        create_access_token,
+        create_refresh_token,
+        decode_token,
+        get_current_user,
+    )
+except (ImportError, ValueError):
+    import models
+    from database import get_db
+    from auth import (
+        hash_password,
+        verify_password,
+        create_access_token,
+        create_refresh_token,
+        decode_token,
+        get_current_user,
+    )
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 

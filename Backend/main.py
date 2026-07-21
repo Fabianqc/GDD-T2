@@ -7,11 +7,18 @@ from dotenv import load_dotenv
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-from . import models
-from .database import engine, get_db
-from .routers import auth as auth_router
-from .routers import ai as ai_router
-from .routers import dashboard as dashboard_router
+try:
+    from . import models
+    from .database import engine, get_db
+    from .routers import auth as auth_router
+    from .routers import ai as ai_router
+    from .routers import dashboard as dashboard_router
+except (ImportError, ValueError):
+    import models
+    from database import engine, get_db
+    from routers import auth as auth_router
+    from routers import ai as ai_router
+    from routers import dashboard as dashboard_router
 
 # Crear las tablas en la base de datos (si no existen)
 models.Base.metadata.create_all(bind=engine)

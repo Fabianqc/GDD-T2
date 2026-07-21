@@ -1,9 +1,14 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
-from ..ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL
-from ..auth import get_current_user
-from .. import models
+try:
+    from ..ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL
+    from ..auth import get_current_user
+    from .. import models
+except (ImportError, ValueError):
+    from ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL
+    from auth import get_current_user
+    import models
 
 router = APIRouter(prefix="/ai", tags=["Inteligencia Artificial"])
 

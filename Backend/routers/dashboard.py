@@ -5,9 +5,14 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 
-from .. import models
-from ..database import get_db
-from ..auth import get_current_user
+try:
+    from .. import models
+    from ..database import get_db
+    from ..auth import get_current_user
+except (ImportError, ValueError):
+    import models
+    from database import get_db
+    from auth import get_current_user
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard por Roles"])
 

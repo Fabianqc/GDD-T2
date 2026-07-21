@@ -1,0 +1,41 @@
+name: Deploy Backend to Server
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'Backend/**'
+
+jobs:
+  deploy:
+    name: Deploy Backend via SSH & PM2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            echo "🚀 Actualizando repositorio en el servidor..."
+            cd ~/GDD-T2
+            git pull origin main
+
+            echo "📦 Actualizando dependencias de Python..."
+            cd ~/GDD-T2/Backend
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            echo "🔄 Reiniciando servicio en PM2..."
+            pm2 restart gdd-t2-backend || pm2 start ecosystem.config.js
+
+            echo "✅ ¡Despliegue de Backend completado exitosamente!"
