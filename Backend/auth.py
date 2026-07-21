@@ -9,8 +9,12 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from .database import get_db
-from . import models
+try:
+    from .database import get_db
+    from . import models
+except (ImportError, ValueError):
+    from database import get_db
+    import models
 
 # ── Config ──────────────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "gdd-t2-super-secret-key-change-in-production")
