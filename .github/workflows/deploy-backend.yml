@@ -40,8 +40,14 @@ jobs:
             pip install -r requirements.txt
 
             echo "🔄 Reiniciando servicio en PM2..."
-            export PATH=$PATH:/usr/local/bin:~/.nvm/versions/node/$(node -v 2>/dev/null)/bin:~/.npm-global/bin
-            pm2 restart gdd-t2-backend || pm2 start ecosystem.config.js
-            pm2 save
+            export NVM_DIR="$HOME/.nvm"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              . "$NVM_DIR/nvm.sh"
+            fi
+            export PATH=$PATH:/usr/local/bin:/usr/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$HOME/.npm-global/bin
+            
+            PM2_CMD=$(which pm2 2>/dev/null || echo "pm2")
+            $PM2_CMD restart gdd-t2-backend || $PM2_CMD start ecosystem.config.js
+            $PM2_CMD save
 
             echo "✅ ¡Despliegue de Backend completado exitosamente!"
