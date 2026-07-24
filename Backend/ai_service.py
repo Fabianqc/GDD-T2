@@ -3,7 +3,9 @@ import httpx
 from fastapi import HTTPException
 
 # ── Configuración de Variables del .env ────────────────────────────────────────
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()  # 'gemini' o 'ollama'
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia").lower()  # 'nvidia', 'gemini' o 'ollama'
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "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")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.2-90b-vision-instruct")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
@@ -11,12 +13,62 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 async def generate_text(prompt: str) -> str:
     """
     Genera contenido basado en un prompt, utilizando el proveedor configurado en el .env:
+    - 'nvidia': Conexión con NVIDIA API (meta/llama-3.2-90b-vision-instruct).
     - 'gemini': Conexión con la API oficial de Google Gemini.
     - 'ollama': Conexión con tu servidor local de Ollama (ej. qwen2.5:1.5b).
     """
     
+    # ── Conexión con NVIDIA API (Llama 3.2 90B Vision) ───────────────────────
+    if LLM_PROVIDER in ["nvidia", "llama"]:
+        if not NVIDIA_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="Error de configuración: Falta definir NVIDIA_API_KEY en tu archivo .env"
+            )
+        
+        url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "model": NVIDIA_MODEL,
+            "frequency_penalty": 0,
+            "max_tokens": 512,
+            "presence_penalty": 0,
+            "stream": False,
+            "temperature": 1,
+            "top_p": 1
+        }
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extraemos el texto generado por NVIDIA API
+                return data["choices"][0]["message"]["content"]
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Error de API NVIDIA ({e.response.status_code}): {e.response.text}"
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Error de conexión con la API de NVIDIA: {str(e)}"
+                )
+
     # ── Conexión con Google Gemini ────────────────────────────────────────────
-    if LLM_PROVIDER == "gemini":
+    elif LLM_PROVIDER == "gemini":
         if not GEMINI_API_KEY:
             raise HTTPException(
                 status_code=500,
@@ -87,7 +139,7 @@ async def generate_text(prompt: str) -> str:
     else:
         raise HTTPException(
             status_code=500,
-            detail=f"Proveedor de LLM '{LLM_PROVIDER}' no soportado. Usa 'gemini' o 'ollama' en tu archivo .env"
+            detail=f"Proveedor de LLM '{LLM_PROVIDER}' no soportado. Usa 'nvidia', 'gemini' u 'ollama' en tu archivo .env"
         )
 
 
@@ -122,8 +174,9 @@ def extract_json_block(text: str) -> dict:
 async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -> dict:
     """
     Analiza una imagen en base64 de un plato de comida.
-    - Si usa Gemini: Envía la imagen directo a Gemini 1.5 Flash (multimodal) para reconocimiento automático.
-    - Si usa Ollama local (text-only por defecto): Devuelve una predicción simulada inteligente para no trabar el flujo.
+    - Si usa NVIDIA: Envía la imagen directo a Llama 3.2 90B Vision en NVIDIA API.
+    - Si usa Gemini: Envía la imagen directo a Gemini 1.5 Flash (multimodal).
+    - Si usa Ollama local (text-only por defecto): Devuelve una predicción simulada o multimodal local.
     """
     prompt = (
         "Analiza la imagen de este plato de comida y determina:\n"
@@ -138,7 +191,52 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
         "}"
     )
 
-    if LLM_PROVIDER == "gemini":
+    if LLM_PROVIDER in ["nvidia", "llama"]:
+        if not NVIDIA_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="Falta configurar NVIDIA_API_KEY para análisis de fotos."
+            )
+
+        url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        
+        image_url_val = image_base64 if image_base64.startswith("data:") else f"data:{mime_type};base64,{image_base64}"
+        
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_url_val}}
+                    ]
+                }
+            ],
+            "model": NVIDIA_MODEL,
+            "max_tokens": 512,
+            "temperature": 0.2
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload, timeout=40.0)
+                response.raise_for_status()
+                data = response.json()
+                response_text = data["choices"][0]["message"]["content"]
+                
+                return extract_json_block(response_text)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Error en el escáner de comida de NVIDIA API: {str(e)}"
+                )
+
+    elif LLM_PROVIDER == "gemini":
         if not GEMINI_API_KEY:
             raise HTTPException(
                 status_code=500,
@@ -179,7 +277,6 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
 
     # ── Soporte Ollama Local (Multimodal / Fallback Inteligente) ────────────────
     else:
-        # Intentamos realizar un análisis visual local si Ollama tiene un modelo de visión (como qwen2.5vl:3b o llava)
         url = f"{OLLAMA_BASE_URL}/api/generate"
         payload = {
             "model": OLLAMA_MODEL,
@@ -197,11 +294,10 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
                 
                 return extract_json_block(response_text)
             except Exception:
-                # Si falla (ej. el modelo local es puramente de texto o no soporta imágenes),
-                # retornamos el fallback de seguridad para no trabar el desarrollo.
                 return {
                     "food_name": "Tostadas integrales con aguacate y huevo",
                     "portion_size_g": 180.0,
                     "meal_type": "DESAYUNO"
                 }
+
 

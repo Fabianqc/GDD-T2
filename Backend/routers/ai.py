@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 try:
-    from ..ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL
+    from ..ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL, NVIDIA_MODEL
     from ..auth import get_current_user
     from .. import models
 except (ImportError, ValueError):
-    from ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL
+    from ai_service import generate_text, analyze_food_image, LLM_PROVIDER, OLLAMA_MODEL, NVIDIA_MODEL
     from auth import get_current_user
     import models
 
@@ -36,14 +36,19 @@ async def generate_ai_response(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Genera una respuesta usando el proveedor de Inteligencia Artificial activo (Gemini u Ollama local).
+    Genera una respuesta usando el proveedor de Inteligencia Artificial activo (NVIDIA, Gemini u Ollama local).
     Requiere autenticación de usuario (JWT).
     """
     clean_prompt = data.prompt.strip()
     response_text = await generate_text(clean_prompt)
     
     # Determinamos el nombre del modelo a retornar en los metadatos
-    model_name = "gemini-1.5-flash" if LLM_PROVIDER == "gemini" else OLLAMA_MODEL
+    if LLM_PROVIDER in ["nvidia", "llama"]:
+        model_name = NVIDIA_MODEL
+    elif LLM_PROVIDER == "gemini":
+        model_name = "gemini-1.5-flash"
+    else:
+        model_name = OLLAMA_MODEL
     
     return AIResponse(
         response=response_text,
