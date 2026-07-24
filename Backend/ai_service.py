@@ -10,6 +10,52 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 
+async def _call_nvidia_api(prompt: str) -> str:
+    if not NVIDIA_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Error de configuración: Falta definir NVIDIA_API_KEY en tu archivo .env"
+        )
+    
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "model": NVIDIA_MODEL,
+        "frequency_penalty": 0,
+        "max_tokens": 512,
+        "presence_penalty": 0,
+        "stream": False,
+        "temperature": 1,
+        "top_p": 1
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Error de API NVIDIA ({e.response.status_code}): {e.response.text}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Error de conexión con la API de NVIDIA: {str(e)}"
+            )
+
 async def generate_text(prompt: str) -> str:
     """
     Genera contenido basado en un prompt, utilizando el proveedor configurado en el .env:
@@ -20,52 +66,7 @@ async def generate_text(prompt: str) -> str:
     
     # ── Conexión con NVIDIA API (Llama 3.2 90B Vision) ───────────────────────
     if LLM_PROVIDER in ["nvidia", "llama"]:
-        if not NVIDIA_API_KEY:
-            raise HTTPException(
-                status_code=500,
-                detail="Error de configuración: Falta definir NVIDIA_API_KEY en tu archivo .env"
-            )
-        
-        url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {NVIDIA_API_KEY}",
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "model": NVIDIA_MODEL,
-            "frequency_penalty": 0,
-            "max_tokens": 512,
-            "presence_penalty": 0,
-            "stream": False,
-            "temperature": 1,
-            "top_p": 1
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
-                
-                # Extraemos el texto generado por NVIDIA API
-                return data["choices"][0]["message"]["content"]
-            except httpx.HTTPStatusError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Error de API NVIDIA ({e.response.status_code}): {e.response.text}"
-                )
-            except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Error de conexión con la API de NVIDIA: {str(e)}"
-                )
+        return await _call_nvidia_api(prompt)
 
     # ── Conexión con Google Gemini ────────────────────────────────────────────
     elif LLM_PROVIDER == "gemini":
@@ -124,16 +125,16 @@ async def generate_text(prompt: str) -> str:
                 
                 # Extraemos el texto generado por Ollama
                 return data.get("response", "")
-            except httpx.HTTPStatusError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Ollama devolvió un error ({e.response.status_code}): {e.response.text}"
-                )
             except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"No se pudo conectar a Ollama local en {OLLAMA_BASE_URL}. ¿Está Ollama abierto y ejecutándose? Detalles: {str(e)}"
-                )
+                # Fallback automático a NVIDIA API si Ollama local no está corriendo en producción
+                print(f"[AI Service] Ollama local no disponible ({e}), usando fallback NVIDIA API...")
+                try:
+                    return await _call_nvidia_api(prompt)
+                except Exception as n_err:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Error en IA (Ollama y NVIDIA fallaron): {str(n_err)}"
+                    )
 
     # ── Proveedor No Soportado ────────────────────────────────────────────────
     else:

@@ -1,13 +1,14 @@
 # Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
 Backend/venv/
-Backend/__pycache__/
-Backend/*.pyc
-Backend/*.pyo
-Backend/*.pyd
-Backend/.pytest_cache/
-Backend/.coverage
-Backend/htmlcov/
 Backend/.env
+
 
 # Node.js (Frontend/Expo)
 Frontend/node_modules/
