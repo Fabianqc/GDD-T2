@@ -10,7 +10,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 
-async def _call_nvidia_api(prompt: str) -> str:
+async def _call_nvidia_api(prompt: str, system_prompt: Optional[str] = None) -> str:
     if not NVIDIA_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -23,19 +23,20 @@ async def _call_nvidia_api(prompt: str) -> str:
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
+    
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
     payload = {
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+        "messages": messages,
         "model": NVIDIA_MODEL,
         "frequency_penalty": 0,
         "max_tokens": 512,
         "presence_penalty": 0,
         "stream": False,
-        "temperature": 1,
+        "temperature": 0.7,
         "top_p": 1
     }
     
@@ -56,7 +57,7 @@ async def _call_nvidia_api(prompt: str) -> str:
                 detail=f"Error de conexión con la API de NVIDIA: {str(e)}"
             )
 
-async def generate_text(prompt: str) -> str:
+async def generate_text(prompt: str, system_prompt: Optional[str] = None) -> str:
     """
     Genera contenido basado en un prompt, utilizando el proveedor configurado en el .env:
     - 'nvidia': Conexión con NVIDIA API (meta/llama-3.2-90b-vision-instruct).
@@ -66,7 +67,7 @@ async def generate_text(prompt: str) -> str:
     
     # ── Conexión con NVIDIA API (Llama 3.2 90B Vision) ───────────────────────
     if LLM_PROVIDER in ["nvidia", "llama"]:
-        return await _call_nvidia_api(prompt)
+        return await _call_nvidia_api(prompt, system_prompt=system_prompt)
 
     # ── Conexión con Google Gemini ────────────────────────────────────────────
     elif LLM_PROVIDER == "gemini":
@@ -76,14 +77,14 @@ async def generate_text(prompt: str) -> str:
                 detail="Error de configuración: Falta definir GEMINI_API_KEY en tu archivo .env"
             )
         
-        # Usamos el modelo ultra rápido y eficiente gemini-1.5-flash
+        full_text = f"{system_prompt}\n\nConsulta del usuario: {prompt}" if system_prompt else prompt
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [
                 {
                     "parts": [
-                        {"text": prompt}
+                        {"text": full_text}
                     ]
                 }
             ]
@@ -110,10 +111,11 @@ async def generate_text(prompt: str) -> str:
 
     # ── Conexión con Ollama Local ─────────────────────────────────────────────
     elif LLM_PROVIDER == "ollama":
+        full_text = f"{system_prompt}\n\nConsulta del usuario: {prompt}" if system_prompt else prompt
         url = f"{OLLAMA_BASE_URL}/api/generate"
         payload = {
             "model": OLLAMA_MODEL,
-            "prompt": prompt,
+            "prompt": full_text,
             "stream": False
         }
         
@@ -129,7 +131,7 @@ async def generate_text(prompt: str) -> str:
                 # Fallback automático a NVIDIA API si Ollama local no está corriendo en producción
                 print(f"[AI Service] Ollama local no disponible ({e}), usando fallback NVIDIA API...")
                 try:
-                    return await _call_nvidia_api(prompt)
+                    return await _call_nvidia_api(prompt, system_prompt=system_prompt)
                 except Exception as n_err:
                     raise HTTPException(
                         status_code=502,
@@ -148,7 +150,7 @@ import re
 import json
 
 def extract_json_block(text: str) -> dict:
-    """Extrae de manera segura un objeto JSON de una cadena de texto."""
+    """Extrae de manera segura un objeto JSON de una cadena de texto e identifica si es comida real."""
     try:
         # Intentamos extraer lo que esté entre corchetes { } en caso de que la IA responda con markdown ```json
         match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -157,38 +159,71 @@ def extract_json_block(text: str) -> dict:
         else:
             parsed = json.loads(text)
         
-        # Validar y limpiar campos obligatorios
+        is_food = bool(parsed.get("is_food", True))
+        food_name = str(parsed.get("food_name", "")).strip()
+        
+        # Filtro de palabras clave para detectar cuando la IA indica no-comida
+        non_food_keywords = ["no es comida", "no hay comida", "no comida", "sin alimentos", "no food", "sin comida", "no detectado", "desconocido"]
+        if any(keyword in food_name.lower() for keyword in non_food_keywords):
+            is_food = False
+
+        if not is_food:
+            return {
+                "is_food": False,
+                "food_name": "No es comida",
+                "portion_size_g": 0.0,
+                "meal_type": "ALMUERZO",
+                "error_message": str(parsed.get("error_message", "No se detectó ningún alimento en la imagen."))
+            }
+
         return {
-            "food_name": str(parsed.get("food_name", "Comida escaneada")),
+            "is_food": True,
+            "food_name": food_name if food_name else "Alimento Escaneado",
             "portion_size_g": float(parsed.get("portion_size_g", 150.0)),
-            "meal_type": str(parsed.get("meal_type", "ALMUERZO")).upper()
+            "meal_type": str(parsed.get("meal_type", "ALMUERZO")).upper(),
+            "error_message": None
         }
     except Exception:
-        # Fallback de seguridad
+        # Fallback de seguridad en caso de error de parseo
         return {
+            "is_food": True,
             "food_name": "Alimento Escaneado",
             "portion_size_g": 200.0,
-            "meal_type": "ALMUERZO"
+            "meal_type": "ALMUERZO",
+            "error_message": None
         }
 
 
 async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -> dict:
     """
-    Analiza una imagen en base64 de un plato de comida.
-    - Si usa NVIDIA: Envía la imagen directo a Llama 3.2 90B Vision en NVIDIA API.
-    - Si usa Gemini: Envía la imagen directo a Gemini 1.5 Flash (multimodal).
-    - Si usa Ollama local (text-only por defecto): Devuelve una predicción simulada o multimodal local.
+    Analiza una imagen en base64 para detectar platos de comida comestible.
+    - Si detecta comida real: retorna is_food=True, el nombre del plato, porción en gramos y tipo de comida.
+    - Si la foto NO muestra alimentos (objetos, ropa, personas, mascotas, fondos): retorna is_food=False sin inventar.
     """
     prompt = (
-        "Analiza la imagen de este plato de comida y determina:\n"
-        "1. El nombre del alimento o plato principal (en español, corto, ej: 'Pescado frito con arroz').\n"
-        "2. El peso aproximado de la porción en gramos (solo el número, ej: 250).\n"
-        "3. El tipo de comida (debe ser estrictamente uno de los siguientes: 'DESAYUNO', 'ALMUERZO', 'CENA', 'MERIENDA').\n\n"
-        "DEBES RESPONDER EXCLUSIVAMENTE UN OBJETO JSON con esta estructura exacta, sin textos de introducción ni despedida:\n"
+        "Eres un experto analizador de nutrición e imágenes de alimentos.\n"
+        "Examina con máxima atención la imagen proporcionada y responde ÚNICAMENTE con un objeto JSON.\n\n"
+        "REGLAS DE RECONOCIMIENTO:\n"
+        "1. EVALÚA SI HAY COMIDA REAL: ¿La foto muestra claramente un plato preparado, ingrediente, fruta, verdura o bebida comestible?\n"
+        "2. SI NO HAY COMIDA (personas, ropa, objetos, muebles, pantallas, mascotas, fotos borrosas o sin alimentos claros):\n"
+        "   - Pon \"is_food\": false\n"
+        "   - Pon \"food_name\": \"No es comida\"\n"
+        "   - Pon \"portion_size_g\": 0\n"
+        "   - Pon \"error_message\": \"No se ha detectado ningún alimento o plato comestible en la foto.\"\n"
+        "   - ¡NO INVENTES NI SUPONGAS ALIMENTOS QUE NO ESTÁN PRESENTES!\n\n"
+        "3. SI SÍ HAY COMIDA REAL:\n"
+        "   - Pon \"is_food\": true\n"
+        "   - \"food_name\": Nombre conciso del plato en español (ej: 'Pollo a la plancha con ensalada').\n"
+        "   - \"portion_size_g\": Estimación realista del peso total en gramos (ej: 250).\n"
+        "   - \"meal_type\": Estrictamente uno de: 'DESAYUNO', 'ALMUERZO', 'CENA', 'MERIENDA'.\n"
+        "   - \"error_message\": null\n\n"
+        "ESTRUCTURA DE RESPUESTA JSON (SIN TEXTO ADICIONAL NI MARKDOWN):\n"
         "{\n"
-        "  \"food_name\": \"Nombre de la comida\",\n"
+        "  \"is_food\": true,\n"
+        "  \"food_name\": \"Nombre del plato\",\n"
         "  \"portion_size_g\": 250,\n"
-        "  \"meal_type\": \"ALMUERZO\"\n"
+        "  \"meal_type\": \"ALMUERZO\",\n"
+        "  \"error_message\": null\n"
         "}"
     )
 
@@ -220,7 +255,7 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
             ],
             "model": NVIDIA_MODEL,
             "max_tokens": 512,
-            "temperature": 0.2
+            "temperature": 0.1
         }
 
         async with httpx.AsyncClient() as client:
@@ -296,9 +331,12 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
                 return extract_json_block(response_text)
             except Exception:
                 return {
+                    "is_food": True,
                     "food_name": "Tostadas integrales con aguacate y huevo",
                     "portion_size_g": 180.0,
-                    "meal_type": "DESAYUNO"
+                    "meal_type": "DESAYUNO",
+                    "error_message": None
                 }
+
 
 
