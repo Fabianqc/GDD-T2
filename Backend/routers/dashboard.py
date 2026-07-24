@@ -1,28 +1,73 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Any, Dict
+from datetime import datetime, timedelta
 import uuid
+import io
 
 try:
     from .. import models
     from ..database import get_db
     from ..auth import get_current_user
+    from ..report_service import (
+        require_doctor,
+        get_assigned_patient_profile,
+        parse_report_period,
+        build_clinical_report,
+        bundle_to_dict,
+        export_report_csv,
+        export_report_pdf,
+        build_metabolic_summary_for_dashboard,
+    )
 except (ImportError, ValueError):
     import models
     from database import get_db
     from auth import get_current_user
+    from report_service import (
+        require_doctor,
+        get_assigned_patient_profile,
+        parse_report_period,
+        build_clinical_report,
+        bundle_to_dict,
+        export_report_csv,
+        export_report_pdf,
+        build_metabolic_summary_for_dashboard,
+    )
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard por Roles"])
+
+
+def _intake_to_response(log: models.IntakeLog, food_name: str) -> "IntakeResponse":
+    return IntakeResponse(
+        id=str(log.id),
+        food_name=food_name,
+        portion_size_g=float(log.portion_size_g),
+        meal_type=log.meal_type.value,
+        consumed_at=log.consumed_at,
+        image_base64=log.image_base64,
+        doctor_assessment=log.doctor_assessment,
+        doctor_comment=log.doctor_comment,
+        calories=float(log.calories) if log.calories is not None else None,
+        carbs_g=float(log.carbs_g) if log.carbs_g is not None else None,
+        glycemic_index=float(log.glycemic_index) if log.glycemic_index is not None else None,
+        glycemic_load=float(log.glycemic_load) if log.glycemic_load is not None else None,
+    )
+
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class IntakeCreateRequest(BaseModel):
     food_name: str
-    portion_size_g: float
+    portion_size_g: float = Field(..., ge=0.1, le=99999.0, description="Porción en gramos")
     meal_type: models.MealType
     image_base64: Optional[str] = None
+    consumed_at: Optional[str] = None  # Format: YYYY-MM-DD or ISO string
+    calories: Optional[float] = Field(default=None, ge=0, le=10000, description="Calorías de la porción")
+    carbs_g: Optional[float] = Field(default=None, ge=0, le=2000, description="Carbohidratos (g) de la porción")
+    glycemic_index: Optional[float] = Field(default=None, ge=0, le=100, description="Índice glucémico")
+    glycemic_load: Optional[float] = Field(default=None, ge=0, le=500, description="Carga glucémica de la porción")
 
 class IntakeResponse(BaseModel):
     id: str
@@ -33,6 +78,10 @@ class IntakeResponse(BaseModel):
     image_base64: Optional[str] = None
     doctor_assessment: Optional[str] = None
     doctor_comment: Optional[str] = None
+    calories: Optional[float] = None
+    carbs_g: Optional[float] = None
+    glycemic_index: Optional[float] = None
+    glycemic_load: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -115,6 +164,92 @@ class ChangeRoleRequest(BaseModel):
     user_id: str
     new_role: models.UserRole
 
+# ── Schemas RF-02 ────────────────────────────────────────────────────────────
+
+class GlucoseLogCreate(BaseModel):
+    glucose_level: float = Field(..., ge=20.0, le=600.0, description="Nivel de glucosa en mg/dL")
+    context: models.GlycemicContext
+    recorded_at: Optional[str] = None
+
+class GlucoseLogResponse(BaseModel):
+    id: str
+    glucose_level: float
+    context: str
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class AnthropometricCreate(BaseModel):
+    weight_kg: float = Field(..., ge=20.0, le=350.0, description="Peso en kg")
+    height_cm: float = Field(..., ge=50.0, le=260.0, description="Estatura en cm")
+    recorded_at: Optional[str] = None
+
+class AnthropometricResponse(BaseModel):
+    id: str
+    weight_kg: float
+    height_cm: float
+    bmi: float
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class MedicationLogCreate(BaseModel):
+    medication_name: str
+    dosage: str
+    taken_at: Optional[str] = None
+
+class MedicationLogResponse(BaseModel):
+    id: str
+    medication_name: str
+    dosage: str
+    taken_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class PhysicalActivityCreate(BaseModel):
+    activity_type: str
+    duration_minutes: int = Field(..., ge=1, le=1440, description="Duración en minutos")
+    recorded_at: Optional[str] = None
+
+class PhysicalActivityResponse(BaseModel):
+    id: str
+    activity_type: str
+    duration_minutes: int
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class NutritionSummary(BaseModel):
+    intake_count: int = 0
+    total_calories: Optional[float] = None
+    total_carbs_g: Optional[float] = None
+    avg_glycemic_index: Optional[float] = None
+    avg_glycemic_load: Optional[float] = None
+    last_7_days_calories: Optional[float] = None
+    last_7_days_carbs_g: Optional[float] = None
+
+
+class MetabolicQuickStats(BaseModel):
+    latest_glucose: Optional[float] = None
+    latest_glucose_context: Optional[str] = None
+    latest_bmi: Optional[float] = None
+    bmi_category: Optional[str] = None
+    activity_minutes_7d: int = 0
+    medication_doses_7d: int = 0
+    glucose_count: int = 0
+
+
+class DoctorPatientMetabolicSummary(BaseModel):
+    patient_id: str
+    patient_name: str
+    profile: Optional[dict] = None
+    glucose_logs: List[GlucoseLogResponse]
+    anthropometric_logs: List[AnthropometricResponse]
+    medication_logs: List[MedicationLogResponse]
+    physical_activity_logs: List[PhysicalActivityResponse]
+    nutrition: Optional[NutritionSummary] = None
+    quick_stats: Optional[MetabolicQuickStats] = None
+
 
 # ── 1. Endpoints de PACIENTE ──────────────────────────────────────────────────
 
@@ -140,25 +275,70 @@ def create_intake(
     # 2. Buscar o auto-crear el alimento en el catálogo
     clean_food_name = data.food_name.strip().title()
     food = db.query(models.Food).filter(models.Food.name.ilike(clean_food_name)).first()
+
+    # Estimar valores por 100g a partir de la porción, si vienen datos nutricionales
+    safe_portion = min(max(round(data.portion_size_g, 2), 0.1), 99999.0)
+    cal = round(float(data.calories), 2) if data.calories is not None else None
+    carbs = round(float(data.carbs_g), 2) if data.carbs_g is not None else None
+    gi = round(float(data.glycemic_index), 2) if data.glycemic_index is not None else None
+    gl = round(float(data.glycemic_load), 2) if data.glycemic_load is not None else None
+
+    cal_per_100 = round((cal / safe_portion) * 100, 2) if cal is not None else 120.0
+    carbs_per_100 = round((carbs / safe_portion) * 100, 2) if carbs is not None else 15.0
+    catalog_gi = gi if gi is not None else 55.0
+    catalog_gl = gl if gl is not None else 10.0
+
     if not food:
         food = models.Food(
             name=clean_food_name,
-            glycemic_index=55.0,  # Valores estándar por defecto
-            glycemic_load=10.0,
-            calories_per_100g=120.0,
-            carbs_per_100g=15.0
+            glycemic_index=catalog_gi,
+            glycemic_load=catalog_gl,
+            calories_per_100g=cal_per_100,
+            carbs_per_100g=carbs_per_100,
         )
         db.add(food)
         db.commit()
         db.refresh(food)
+    elif cal is not None or carbs is not None or gi is not None or gl is not None:
+        # Actualiza el catálogo con la estimación más reciente de la porción
+        if gi is not None:
+            food.glycemic_index = catalog_gi
+        if gl is not None:
+            food.glycemic_load = catalog_gl
+        if cal is not None:
+            food.calories_per_100g = cal_per_100
+        if carbs is not None:
+            food.carbs_per_100g = carbs_per_100
+        db.commit()
+        db.refresh(food)
 
-    # 3. Registrar la ingesta
+    consumed_datetime = datetime.now()
+    if data.consumed_at:
+        try:
+            clean_str = data.consumed_at.strip()
+            if "T" in clean_str:
+                consumed_datetime = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            elif " " in clean_str and ":" in clean_str:
+                consumed_datetime = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+            elif len(clean_str) == 10:
+                now_time = datetime.now().time()
+                c_date = datetime.strptime(clean_str, "%Y-%m-%d").date()
+                consumed_datetime = datetime.combine(c_date, now_time)
+        except Exception:
+            consumed_datetime = datetime.now()
+
+    # 3. Registrar la ingesta con nutrición de la porción consumida
     log = models.IntakeLog(
         patient_id=profile.user_id,
         food_id=food.id,
         meal_type=data.meal_type,
-        portion_size_g=round(data.portion_size_g, 2),
-        image_base64=data.image_base64
+        portion_size_g=safe_portion,
+        calories=cal,
+        carbs_g=carbs,
+        glycemic_index=gi,
+        glycemic_load=gl,
+        image_base64=data.image_base64,
+        consumed_at=consumed_datetime
     )
     db.add(log)
     db.commit()
@@ -170,7 +350,11 @@ def create_intake(
         portion_size_g=float(log.portion_size_g),
         meal_type=log.meal_type.value,
         consumed_at=log.consumed_at,
-        image_base64=log.image_base64
+        image_base64=log.image_base64,
+        calories=float(log.calories) if log.calories is not None else None,
+        carbs_g=float(log.carbs_g) if log.carbs_g is not None else None,
+        glycemic_index=float(log.glycemic_index) if log.glycemic_index is not None else None,
+        glycemic_load=float(log.glycemic_load) if log.glycemic_load is not None else None,
     )
 
 @router.get("/patient/intakes", response_model=List[IntakeResponse])
@@ -188,16 +372,7 @@ def get_intakes(
     for log in logs:
         food = db.query(models.Food).filter(models.Food.id == log.food_id).first()
         result.append(
-            IntakeResponse(
-                id=str(log.id),
-                food_name=food.name if food else "Alimento Desconocido",
-                portion_size_g=float(log.portion_size_g),
-                meal_type=log.meal_type.value,
-                consumed_at=log.consumed_at,
-                image_base64=log.image_base64,
-                doctor_assessment=log.doctor_assessment,
-                doctor_comment=log.doctor_comment
-            )
+            _intake_to_response(log, food.name if food else "Alimento Desconocido")
         )
     return result
 
@@ -263,34 +438,68 @@ def update_patient_profile(
         )
         db.add(profile)
 
-    # Actualizar campos si se proporcionan en el request
+    # 1. Autoformatear y Validar Fecha de Nacimiento
     if data.date_of_birth:
+        raw_date = data.date_of_birth.strip().replace(" ", "-").replace("/", "-").replace(".", "-")
         try:
-            profile.date_of_birth = datetime.strptime(data.date_of_birth.strip(), "%Y-%m-%d").date()
+            parsed_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            if parsed_date > datetime.utcnow().date():
+                raise HTTPException(status_code=400, detail="La fecha de nacimiento no puede ser una fecha futura.")
+            profile.date_of_birth = parsed_date
         except ValueError:
-            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Debe ser YYYY-MM-DD")
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Formato aceptado: AAAA-MM-DD (ej: 1990-01-01).")
 
+    # 2. Normalizar Género (Masculino, Femenino, Otro)
     if data.gender is not None:
-        profile.gender = data.gender.strip()
-    if data.weight_kg is not None:
-        profile.weight_kg = round(data.weight_kg, 2)
-    if data.height_cm is not None:
-        profile.height_cm = round(data.height_cm, 2)
-    if data.diabetes_type is not None:
-        profile.diabetes_type = data.diabetes_type.strip()
-    if data.diagnosis_year is not None:
-        profile.diagnosis_year = data.diagnosis_year
-    if data.last_hba1c is not None:
-        profile.last_hba1c = round(data.last_hba1c, 2)
-    if data.medications is not None:
-        profile.medications = data.medications.strip()
-    if data.allergies is not None:
-        profile.allergies = data.allergies.strip()
-    if data.activity_level is not None:
-        profile.activity_level = data.activity_level.strip()
-    if data.medical_history is not None:
-        profile.medical_history = data.medical_history.strip()
+        clean_gender = data.gender.strip().capitalize()
+        if clean_gender in ["Masculino", "Femenino", "Otro", "Prefiero no decir"]:
+            profile.gender = clean_gender
+        else:
+            profile.gender = data.gender.strip().title()
 
+    # 3. Validar Rangos Numéricos de Peso y Estatura
+    if data.weight_kg is not None:
+        if data.weight_kg < 20.0 or data.weight_kg > 350.0:
+            raise HTTPException(status_code=400, detail="El peso debe estar en un rango realista (entre 20 kg y 350 kg).")
+        profile.weight_kg = round(data.weight_kg, 2)
+
+    if data.height_cm is not None:
+        if data.height_cm < 50.0 or data.height_cm > 260.0:
+            raise HTTPException(status_code=400, detail="La estatura debe estar en un rango realista (entre 50 cm y 260 cm).")
+        profile.height_cm = round(data.height_cm, 2)
+
+    if data.diabetes_type is not None:
+        profile.diabetes_type = data.diabetes_type.strip() or "Tipo 2"
+
+    # 4. Validar Año del Diagnóstico
+    current_year = datetime.utcnow().year
+    if data.diagnosis_year is not None:
+        if data.diagnosis_year < 1920 or data.diagnosis_year > current_year:
+            raise HTTPException(status_code=400, detail=f"El año de diagnóstico debe estar entre 1920 y el año actual ({current_year}).")
+        profile.diagnosis_year = data.diagnosis_year
+
+    # 5. Validar HbA1c
+    if data.last_hba1c is not None:
+        if data.last_hba1c < 3.0 or data.last_hba1c > 20.0:
+            raise HTTPException(status_code=400, detail="La hemoglobina glicosilada (HbA1c) debe estar entre 3.0% y 20.0%.")
+        profile.last_hba1c = round(data.last_hba1c, 2)
+
+    # 6. Saneamiento de Textos
+    def sanitize_text(text: Optional[str]) -> Optional[str]:
+        if not text: return None
+        cleaned = text.strip()
+        return None if cleaned in [".", ",", "-", "", "ninguna", "ninguno"] else cleaned
+
+    if data.medications is not None:
+        profile.medications = sanitize_text(data.medications)
+    if data.allergies is not None:
+        profile.allergies = sanitize_text(data.allergies)
+    if data.activity_level is not None:
+        profile.activity_level = sanitize_text(data.activity_level) or "Moderado"
+    if data.medical_history is not None:
+        profile.medical_history = sanitize_text(data.medical_history)
+
+    profile.updated_at = datetime.utcnow()
     db.commit()
     return {"message": "Perfil clínico actualizado exitosamente"}
 
@@ -390,16 +599,7 @@ def get_doctor_patient_intakes(
     for log in logs:
         food = db.query(models.Food).filter(models.Food.id == log.food_id).first()
         result.append(
-            IntakeResponse(
-                id=str(log.id),
-                food_name=food.name if food else "Alimento Desconocido",
-                portion_size_g=float(log.portion_size_g),
-                meal_type=log.meal_type.value,
-                consumed_at=log.consumed_at,
-                image_base64=log.image_base64,
-                doctor_assessment=log.doctor_assessment,
-                doctor_comment=log.doctor_comment
-            )
+            _intake_to_response(log, food.name if food else "Alimento Desconocido")
         )
     return result
 
@@ -723,3 +923,380 @@ def assess_patient_intake(
     db.commit()
 
     return {"message": "Evaluación y comentarios del médico guardados correctamente para esta comida."}
+
+
+# ── RF-02 Endpoints: Módulo de Registro Integral de Variables Metabólicas ───
+
+# 1. Glucemia Capilar (glucose_logs)
+@router.post("/patient/glucose", response_model=GlucoseLogResponse)
+def create_glucose_log(
+    data: GlucoseLogCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    rec_datetime = datetime.now()
+    if data.recorded_at:
+        try:
+            clean_str = data.recorded_at.strip()
+            if "T" in clean_str:
+                rec_datetime = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            elif " " in clean_str and ":" in clean_str:
+                rec_datetime = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+            elif len(clean_str) == 10:
+                rec_datetime = datetime.combine(datetime.strptime(clean_str, "%Y-%m-%d").date(), datetime.now().time())
+        except Exception:
+            rec_datetime = datetime.now()
+
+    log = models.GlucoseLog(
+        patient_id=current_user.id,
+        glucose_level=round(data.glucose_level, 2),
+        context=data.context,
+        recorded_at=rec_datetime
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return GlucoseLogResponse(
+        id=str(log.id),
+        glucose_level=float(log.glucose_level),
+        context=log.context.value,
+        recorded_at=log.recorded_at
+    )
+
+@router.get("/patient/glucose", response_model=List[GlucoseLogResponse])
+def get_glucose_logs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    logs = db.query(models.GlucoseLog).filter(
+        models.GlucoseLog.patient_id == current_user.id
+    ).order_by(models.GlucoseLog.recorded_at.desc()).all()
+
+    return [
+        GlucoseLogResponse(
+            id=str(l.id),
+            glucose_level=float(l.glucose_level),
+            context=l.context.value,
+            recorded_at=l.recorded_at
+        ) for l in logs
+    ]
+
+# 2. Seguimiento Antropométrico con IMC Automático (anthropometric_data)
+@router.post("/patient/anthropometric", response_model=AnthropometricResponse)
+def create_anthropometric_log(
+    data: AnthropometricCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    height_m = data.height_cm / 100.0
+    computed_bmi = round(data.weight_kg / (height_m ** 2), 2)
+
+    rec_datetime = datetime.now()
+    if data.recorded_at:
+        try:
+            clean_str = data.recorded_at.strip()
+            if "T" in clean_str:
+                rec_datetime = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            elif " " in clean_str and ":" in clean_str:
+                rec_datetime = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+            elif len(clean_str) == 10:
+                rec_datetime = datetime.combine(datetime.strptime(clean_str, "%Y-%m-%d").date(), datetime.now().time())
+        except Exception:
+            rec_datetime = datetime.now()
+
+    log = models.AnthropometricData(
+        patient_id=current_user.id,
+        weight_kg=round(data.weight_kg, 2),
+        height_cm=round(data.height_cm, 2),
+        bmi=computed_bmi,
+        recorded_at=rec_datetime
+    )
+    db.add(log)
+
+    profile = db.query(models.PatientProfile).filter(models.PatientProfile.user_id == current_user.id).first()
+    if profile:
+        profile.weight_kg = round(data.weight_kg, 2)
+        profile.height_cm = round(data.height_cm, 2)
+
+    db.commit()
+    db.refresh(log)
+
+    return AnthropometricResponse(
+        id=str(log.id),
+        weight_kg=float(log.weight_kg),
+        height_cm=float(log.height_cm),
+        bmi=float(log.bmi),
+        recorded_at=log.recorded_at
+    )
+
+@router.get("/patient/anthropometric", response_model=List[AnthropometricResponse])
+def get_anthropometric_logs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    logs = db.query(models.AnthropometricData).filter(
+        models.AnthropometricData.patient_id == current_user.id
+    ).order_by(models.AnthropometricData.recorded_at.desc()).all()
+
+    return [
+        AnthropometricResponse(
+            id=str(l.id),
+            weight_kg=float(l.weight_kg),
+            height_cm=float(l.height_cm),
+            bmi=float(l.bmi) if l.bmi else round(float(l.weight_kg)/((float(l.height_cm)/100)**2), 2),
+            recorded_at=l.recorded_at
+        ) for l in logs
+    ]
+
+# 3. Diario de Medicación (medication_logs)
+@router.post("/patient/medication", response_model=MedicationLogResponse)
+def create_medication_log(
+    data: MedicationLogCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    if not data.medication_name.strip():
+        raise HTTPException(status_code=400, detail="El nombre del medicamento no puede estar vacío.")
+
+    rec_datetime = datetime.now()
+    if data.taken_at:
+        try:
+            clean_str = data.taken_at.strip()
+            if "T" in clean_str:
+                rec_datetime = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            elif " " in clean_str and ":" in clean_str:
+                rec_datetime = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+            elif len(clean_str) == 10:
+                rec_datetime = datetime.combine(datetime.strptime(clean_str, "%Y-%m-%d").date(), datetime.now().time())
+        except Exception:
+            rec_datetime = datetime.now()
+
+    log = models.MedicationLog(
+        patient_id=current_user.id,
+        medication_name=data.medication_name.strip(),
+        dosage=data.dosage.strip(),
+        taken_at=rec_datetime
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return MedicationLogResponse(
+        id=str(log.id),
+        medication_name=log.medication_name,
+        dosage=log.dosage,
+        taken_at=log.taken_at
+    )
+
+@router.get("/patient/medication", response_model=List[MedicationLogResponse])
+def get_medication_logs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    logs = db.query(models.MedicationLog).filter(
+        models.MedicationLog.patient_id == current_user.id
+    ).order_by(models.MedicationLog.taken_at.desc()).all()
+
+    return [
+        MedicationLogResponse(
+            id=str(l.id),
+            medication_name=l.medication_name,
+            dosage=l.dosage,
+            taken_at=l.taken_at
+        ) for l in logs
+    ]
+
+# 4. Bitácora de Actividad Física (physical_activity_logs)
+@router.post("/patient/physical-activity", response_model=PhysicalActivityResponse)
+def create_physical_activity_log(
+    data: PhysicalActivityCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    if not data.activity_type.strip():
+        raise HTTPException(status_code=400, detail="El tipo de actividad física no puede estar vacío.")
+
+    rec_datetime = datetime.now()
+    if data.recorded_at:
+        try:
+            clean_str = data.recorded_at.strip()
+            if "T" in clean_str:
+                rec_datetime = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            elif " " in clean_str and ":" in clean_str:
+                rec_datetime = datetime.strptime(clean_str, "%Y-%m-%d %H:%M:%S")
+            elif len(clean_str) == 10:
+                rec_datetime = datetime.combine(datetime.strptime(clean_str, "%Y-%m-%d").date(), datetime.now().time())
+        except Exception:
+            rec_datetime = datetime.now()
+
+    log = models.PhysicalActivityLog(
+        patient_id=current_user.id,
+        activity_type=data.activity_type.strip(),
+        duration_minutes=data.duration_minutes,
+        recorded_at=rec_datetime
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return PhysicalActivityResponse(
+        id=str(log.id),
+        activity_type=log.activity_type,
+        duration_minutes=log.duration_minutes,
+        recorded_at=log.recorded_at
+    )
+
+@router.get("/patient/physical-activity", response_model=List[PhysicalActivityResponse])
+def get_physical_activity_logs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.role != models.UserRole.PACIENTE:
+        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Pacientes.")
+
+    logs = db.query(models.PhysicalActivityLog).filter(
+        models.PhysicalActivityLog.patient_id == current_user.id
+    ).order_by(models.PhysicalActivityLog.recorded_at.desc()).all()
+
+    return [
+        PhysicalActivityResponse(
+            id=str(l.id),
+            activity_type=l.activity_type,
+            duration_minutes=l.duration_minutes,
+            recorded_at=l.recorded_at
+        ) for l in logs
+    ]
+
+# 5. Consulta del Médico para la Ficha e Historial Metabólico (RF-02) de un Paciente Asignado
+@router.get("/doctor/patient/{patient_id}/metabolic-summary", response_model=DoctorPatientMetabolicSummary)
+def get_doctor_patient_metabolic_summary(
+    patient_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Permite al médico revisar el registro integral de variables metabólicas (RF-02) de un paciente asignado."""
+    require_doctor(current_user)
+    profile = get_assigned_patient_profile(db, current_user, patient_id)
+    patient_user = db.query(models.User).filter(models.User.id == profile.user_id).first()
+    if not patient_user:
+        raise HTTPException(status_code=404, detail="Usuario paciente no encontrado.")
+
+    data = build_metabolic_summary_for_dashboard(db, profile, patient_user)
+    return DoctorPatientMetabolicSummary(
+        patient_id=data["patient_id"],
+        patient_name=data["patient_name"],
+        profile=data["profile"],
+        glucose_logs=[GlucoseLogResponse(**g) for g in data["glucose_logs"]],
+        anthropometric_logs=[AnthropometricResponse(**a) for a in data["anthropometric_logs"]],
+        medication_logs=[MedicationLogResponse(**m) for m in data["medication_logs"]],
+        physical_activity_logs=[PhysicalActivityResponse(**a) for a in data["physical_activity_logs"]],
+        nutrition=NutritionSummary(**data["nutrition"]),
+        quick_stats=MetabolicQuickStats(**data["quick_stats"]),
+    )
+
+
+# ── RF-06: Reportes clínicos e indicadores ────────────────────────────────────
+
+class ClinicalReportResponse(BaseModel):
+    patient_id: str
+    patient_name: str
+    doctor_name: str
+    generated_at: str
+    period: Dict[str, Any]
+    profile: Dict[str, Any]
+    metrics: Dict[str, Any]
+    glucose_series: List[Dict[str, Any]]
+    daily_nutrition: List[Dict[str, Any]]
+    intakes: List[Dict[str, Any]]
+    anthropometric_logs: List[Dict[str, Any]]
+    medication_logs: List[Dict[str, Any]]
+    physical_activity_logs: List[Dict[str, Any]]
+    notes: List[str] = []
+
+
+@router.get("/doctor/patient/{patient_id}/clinical-report", response_model=ClinicalReportResponse)
+def get_doctor_clinical_report(
+    patient_id: str,
+    period: str = Query(default="30", description="7 | 30 | 90 | custom"),
+    from_date: Optional[str] = Query(default=None),
+    to_date: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """RF-06: Indicadores de variabilidad glucémica y balance calórico para consulta médica."""
+    require_doctor(current_user)
+    profile = get_assigned_patient_profile(db, current_user, patient_id)
+    patient_user = db.query(models.User).filter(models.User.id == profile.user_id).first()
+    if not patient_user:
+        raise HTTPException(status_code=404, detail="Usuario paciente no encontrado.")
+
+    report_period = parse_report_period(period, from_date, to_date)
+    bundle = build_clinical_report(db, profile, patient_user, current_user, report_period)
+    return bundle_to_dict(bundle)
+
+
+@router.get("/doctor/patient/{patient_id}/clinical-report/export")
+def export_doctor_clinical_report(
+    patient_id: str,
+    format: str = Query(default="pdf", description="pdf | csv"),
+    period: str = Query(default="30"),
+    from_date: Optional[str] = Query(default=None),
+    to_date: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """RF-06: Exporta reporte clínico en PDF o CSV."""
+    require_doctor(current_user)
+    profile = get_assigned_patient_profile(db, current_user, patient_id)
+    patient_user = db.query(models.User).filter(models.User.id == profile.user_id).first()
+    if not patient_user:
+        raise HTTPException(status_code=404, detail="Usuario paciente no encontrado.")
+
+    report_period = parse_report_period(period, from_date, to_date)
+    bundle = build_clinical_report(db, profile, patient_user, current_user, report_period)
+
+    fmt = (format or "pdf").strip().lower()
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in patient_user.first_name.lower())
+    stamp = report_period.to_date.isoformat()
+
+    if fmt == "csv":
+        content = export_report_csv(bundle)
+        filename = f"reporte_clinico_{safe_name}_{stamp}.csv"
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    if fmt == "pdf":
+        content = export_report_pdf(bundle)
+        filename = f"reporte_clinico_{safe_name}_{stamp}.pdf"
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status_code=400, detail="Formato inválido. Use pdf o csv.")

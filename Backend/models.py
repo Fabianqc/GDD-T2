@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Integer, Boolean, Enum as SQLEnum, Date, Text
+from sqlalchemy import Column, String, ForeignKey, DateTime, DECIMAL, Integer, Boolean, Enum as SQLEnum, Date, Text, UniqueConstraint, Time
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -127,7 +127,12 @@ class IntakeLog(Base):
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"))
     food_id = Column(UUID(as_uuid=True), ForeignKey("foods.id", ondelete="RESTRICT"))
     meal_type = Column(SQLEnum(MealType), nullable=False)
-    portion_size_g = Column(DECIMAL(6, 2), nullable=False)
+    portion_size_g = Column(DECIMAL(10, 2), nullable=False)
+    # Valores nutricionales de la porción consumida (estimados por IA o capturados manualmente)
+    calories = Column(DECIMAL(8, 2), nullable=True)
+    carbs_g = Column(DECIMAL(8, 2), nullable=True)
+    glycemic_index = Column(DECIMAL(5, 2), nullable=True)
+    glycemic_load = Column(DECIMAL(5, 2), nullable=True)
     image_base64 = Column(Text, nullable=True)
     doctor_assessment = Column(String(50), nullable=True)  # "CORRECTA" o "INCORRECTA"
     doctor_comment = Column(Text, nullable=True)  # Comentarios/observaciones específicas del doctor
@@ -195,4 +200,138 @@ class MalaiseIncident(Base):
     responded_at = Column(DateTime, nullable=True)
 
     patient = relationship("PatientProfile", backref="malaise_incidents")
+
+
+class AIChatSession(Base):
+    """
+    Sesión de conversación entre un paciente y la IA.
+    """
+    __tablename__ = "ai_chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    patient = relationship("PatientProfile", backref="ai_chat_sessions")
+    messages = relationship("AIChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="AIChatMessage.created_at.asc()")
+
+
+class AIChatMessage(Base):
+    """
+    Mensaje individual perteneciente a una sesión de chat con la IA.
+    """
+    __tablename__ = "ai_chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    sender = Column(String(20), nullable=False)  # "user" o "ai"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    session = relationship("AIChatSession", back_populates="messages")
+
+
+class SavedMenu(Base):
+    """
+    Menú diario personalizado generado por IA y guardado por el paciente.
+    """
+    __tablename__ = "saved_menus"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), nullable=False)
+    target_day = Column(String(10), nullable=False)  # "HOY" or "MANANA"
+    menu_json = Column(Text, nullable=False)  # JSON string with structured meals
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    patient = relationship("PatientProfile", backref="saved_menus")
+
+
+class ReminderDeliveryStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
+class MealReminderConfig(Base):
+    """
+    Configuración global de recordatorios de comida por paciente.
+    Horarios predeterminados; el doctor puede ajustarlos después.
+    """
+    __tablename__ = "meal_reminder_configs"
+
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), primary_key=True)
+    timezone = Column(String(64), nullable=False, default="America/Caracas")
+    advance_minutes = Column(Integer, nullable=False, default=30)
+    enabled = Column(Boolean, nullable=False, default=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    patient = relationship("PatientProfile", backref="meal_reminder_config", uselist=False)
+    slots = relationship(
+        "MealReminderSlot",
+        back_populates="config",
+        cascade="all, delete-orphan",
+        order_by="MealReminderSlot.meal_type",
+    )
+
+
+class MealReminderSlot(Base):
+    """Horario individual por tipo de comida (desayuno, almuerzo, merienda, cena)."""
+    __tablename__ = "meal_reminder_slots"
+    __table_args__ = (
+        UniqueConstraint("patient_id", "meal_type", name="uq_meal_reminder_slot_patient_meal"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("meal_reminder_configs.patient_id", ondelete="CASCADE"), nullable=False)
+    meal_type = Column(SQLEnum(MealType), nullable=False)
+    meal_time = Column(Time, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+
+    config = relationship("MealReminderConfig", back_populates="slots")
+
+
+class PatientPushDevice(Base):
+    """Token Expo Push asociado a un dispositivo del paciente."""
+    __tablename__ = "patient_push_devices"
+    __table_args__ = (
+        UniqueConstraint("expo_push_token", name="uq_patient_push_expo_token"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    expo_push_token = Column(String(255), nullable=False)
+    platform = Column(String(20), nullable=True)  # ios | android
+    device_name = Column(String(150), nullable=True)
+    timezone = Column(String(64), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_seen_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    patient = relationship("PatientProfile", backref="push_devices")
+
+
+class MealReminderDelivery(Base):
+    """
+    Historial de entregas de recordatorios.
+    UNIQUE (patient_id, meal_type, reminder_date) evita notificaciones duplicadas.
+    """
+    __tablename__ = "meal_reminder_deliveries"
+    __table_args__ = (
+        UniqueConstraint("patient_id", "meal_type", "reminder_date", name="uq_meal_reminder_delivery_day"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patient_profiles.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    meal_type = Column(SQLEnum(MealType), nullable=False)
+    reminder_date = Column(Date, nullable=False)
+    status = Column(SQLEnum(ReminderDeliveryStatus), nullable=False, default=ReminderDeliveryStatus.PENDING)
+    scheduled_for = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 

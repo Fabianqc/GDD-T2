@@ -9,6 +9,10 @@ import {
   getAccessToken,
   RegisterData,
 } from '../services/authService';
+import {
+  registerForPushNotifications,
+  unregisterPushNotifications,
+} from '../services/pushNotificationService';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -51,12 +55,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const me = await getMe();
           setUser(me);
+          void registerForPushNotifications(me.role);
         } catch {
           // Access token expirado → intentar rotate
           try {
             await refreshTokens();
             const me = await getMe();
             setUser(me);
+            void registerForPushNotifications(me.role);
           } catch {
             // Refresh también expirado → sesión terminada
             setUser(null);
@@ -74,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await apiLogin(email, password);
     const me = await getMe();
     setUser(me);
+    void registerForPushNotifications(me.role);
   }, []);
 
   const register = useCallback(async (data: RegisterData) => {
@@ -82,9 +89,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await apiLogin(data.email, data.password);
     const me = await getMe();
     setUser(me);
+    void registerForPushNotifications(me.role);
   }, []);
 
   const logout = useCallback(async () => {
+    await unregisterPushNotifications();
     await apiLogout();
     setUser(null);
   }, []);

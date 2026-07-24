@@ -21,3 +21,9 @@ email-validator>=2.0.0
 # HTTP Client for LLM Connections
 httpx>=0.27.0
 
+# Timezones (necesario en Windows para zoneinfo)
+tzdata>=2024.1
+
+# Reportes clínicos PDF (RF-06)
+fpdf2>=2.8.0
+

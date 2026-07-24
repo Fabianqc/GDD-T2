@@ -9,6 +9,18 @@ module.exports = {
       env: {
         NODE_ENV: "production"
       }
+    },
+    {
+      name: "gdd-t2-reminder-worker",
+      cwd: "./",
+      script: "venv/bin/python",
+      args: "reminder_worker.py",
+      interpreter: "none",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production"
+      }
     }
   ]
 };

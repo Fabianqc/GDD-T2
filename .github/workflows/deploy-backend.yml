@@ -47,7 +47,8 @@ jobs:
             export PATH=$PATH:/usr/local/bin:/usr/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$HOME/.npm-global/bin
             
             PM2_CMD=$(which pm2 2>/dev/null || echo "pm2")
-            $PM2_CMD restart gdd-t2-backend || $PM2_CMD start ecosystem.config.js
+            # Reinicia API + worker de recordatorios (definidos en ecosystem.config.js)
+            $PM2_CMD restart ecosystem.config.js --update-env || $PM2_CMD start ecosystem.config.js
             $PM2_CMD save
 
             echo "✅ ¡Despliegue de Backend completado exitosamente!"
