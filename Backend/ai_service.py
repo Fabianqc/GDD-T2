@@ -1,6 +1,8 @@
 import os
 import httpx
+from typing import Optional
 from fastapi import HTTPException
+
 
 # ── Configuración de Variables del .env ────────────────────────────────────────
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia").lower()  # 'nvidia', 'gemini' o 'ollama'
