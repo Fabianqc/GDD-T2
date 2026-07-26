@@ -99,7 +99,16 @@ def get_current_user(
             detail="Token sin identificador de usuario",
         )
 
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    # Convertir a UUID para compatibilidad con PostgreSQL (pg8000 requiere uuid.UUID, no str)
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identificador de usuario inválido",
+        )
+
+    user = db.query(models.User).filter(models.User.id == user_uuid).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
