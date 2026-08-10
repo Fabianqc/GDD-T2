@@ -12,13 +12,13 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 # ── Configuración de Variables del .env ────────────────────────────────────────
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia").lower()  # 'nvidia', 'gemini' o 'ollama'
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.2-90b-vision-instruct")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 
-# El modelo vision 90B es lento con prompts clínicos largos; 30s provocaba ReadTimeout.
-NVIDIA_TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=15.0)
+# Timeout optimizado para evitar Bad Gateway 502 por lecturas lentas
+NVIDIA_TIMEOUT = httpx.Timeout(connect=10.0, read=25.0, write=15.0, pool=10.0)
 
 
 def _format_httpx_error(e: Exception) -> str:
@@ -49,38 +49,33 @@ async def _call_nvidia_api(prompt: str, system_prompt: Optional[str] = None) -> 
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    payload = {
-        "messages": messages,
-        "model": NVIDIA_MODEL,
-        "frequency_penalty": 0,
-        "max_tokens": 512,
-        "presence_penalty": 0,
-        "stream": False,
-        "temperature": 0.7,
-        "top_p": 1
-    }
-    
+    models_to_try = [NVIDIA_MODEL]
+    if NVIDIA_MODEL != "meta/llama-3.1-8b-instruct":
+        models_to_try.append("meta/llama-3.1-8b-instruct")
+
+    last_error = None
     async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, headers=headers, json=payload, timeout=NVIDIA_TIMEOUT)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Error de API NVIDIA ({e.response.status_code}): {e.response.text}"
-            )
-        except httpx.TimeoutException as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Timeout con la API de NVIDIA (el modelo tardó demasiado): {_format_httpx_error(e)}"
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Error de conexión con la API de NVIDIA: {_format_httpx_error(e)}"
-            )
+        for model_name in models_to_try:
+            payload = {
+                "messages": messages,
+                "model": model_name,
+                "frequency_penalty": 0,
+                "max_tokens": 512,
+                "presence_penalty": 0,
+                "stream": False,
+                "temperature": 0.7,
+                "top_p": 1
+            }
+            try:
+                response = await client.post(url, headers=headers, json=payload, timeout=NVIDIA_TIMEOUT)
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_error = e
+                print(f"[AI Service] Error en NVIDIA Text ({model_name}): {_format_httpx_error(e)}")
+
+    raise RuntimeError(f"Error de conexión con la API de NVIDIA: {_format_httpx_error(last_error)}")
 
 async def generate_text(prompt: str, system_prompt: Optional[str] = None) -> str:
     """
@@ -98,7 +93,7 @@ async def generate_text(prompt: str, system_prompt: Optional[str] = None) -> str
             errors.append(f"NVIDIA: {str(e)}")
 
     # ── 2. Conexión con Google Gemini ────────────────────────────────────────────
-    if GEMINI_API_KEY:
+    if GEMINI_API_KEY and GEMINI_API_KEY != "tu-clave-api-de-gemini-aqui":
         try:
             full_text = f"{system_prompt}\n\nConsulta del usuario: {prompt}" if system_prompt else prompt
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -272,12 +267,13 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
         "}"
     )
 
-    if LLM_PROVIDER in ["nvidia", "llama"]:
-        if not NVIDIA_API_KEY:
-            raise HTTPException(
-                status_code=500,
-                detail="Falta configurar NVIDIA_API_KEY para análisis de fotos."
-            )
+    errors = []
+
+    # ── 1. Intento con NVIDIA API ──────────────────────────────────────────────
+    if LLM_PROVIDER in ["nvidia", "llama"] and NVIDIA_API_KEY:
+        models_to_try = [NVIDIA_MODEL]
+        if NVIDIA_MODEL != "meta/llama-3.2-11b-vision-instruct":
+            models_to_try.append("meta/llama-3.2-11b-vision-instruct")
 
         url = "https://integrate.api.nvidia.com/v1/chat/completions"
         headers = {
@@ -285,84 +281,70 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
-        
         image_url_val = image_base64 if image_base64.startswith("data:") else f"data:{mime_type};base64,{image_base64}"
-        
-        payload = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": image_url_val}}
-                    ]
-                }
-            ],
-            "model": NVIDIA_MODEL,
-            "max_tokens": 512,
-            "temperature": 0.1
-        }
 
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload, timeout=NVIDIA_TIMEOUT)
-                response.raise_for_status()
-                data = response.json()
-                response_text = data["choices"][0]["message"]["content"]
-                
-                return extract_json_block(response_text)
-            except httpx.TimeoutException as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Timeout en el escáner de comida de NVIDIA API: {_format_httpx_error(e)}"
-                )
-            except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Error en el escáner de comida de NVIDIA API: {_format_httpx_error(e)}"
-                )
+        for model_name in models_to_try:
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": image_url_val}}
+                        ]
+                    }
+                ],
+                "model": model_name,
+                "max_tokens": 512,
+                "temperature": 0.1
+            }
 
-    elif LLM_PROVIDER == "gemini":
-        if not GEMINI_API_KEY:
-            raise HTTPException(
-                status_code=500,
-                detail="Falta configurar GEMINI_API_KEY para análisis de fotos."
-            )
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.post(url, headers=headers, json=payload, timeout=NVIDIA_TIMEOUT)
+                    response.raise_for_status()
+                    data = response.json()
+                    response_text = data["choices"][0]["message"]["content"]
+                    return extract_json_block(response_text)
+                except Exception as e:
+                    err_msg = _format_httpx_error(e)
+                    print(f"[AI Service] Error en NVIDIA Vision ({model_name}): {err_msg}")
+                    errors.append(f"NVIDIA ({model_name}): {err_msg}")
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": image_base64
+    # ── 2. Fallback con Google Gemini ────────────────────────────────────────────
+    if GEMINI_API_KEY and GEMINI_API_KEY != "tu-clave-api-de-gemini-aqui":
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inline_data": {
+                                    "mime_type": mime_type,
+                                    "data": image_base64
+                                }
                             }
-                        }
-                    ]
-                }
-            ]
-        }
+                        ]
+                    }
+                ]
+            }
 
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, headers=headers, json=payload, timeout=40.0)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=headers, json=payload, timeout=25.0)
                 response.raise_for_status()
                 data = response.json()
                 response_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                
                 return extract_json_block(response_text)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Error en el escáner de comida de Gemini: {str(e)}"
-                )
+        except Exception as e:
+            err_msg = _format_httpx_error(e)
+            print(f"[AI Service] Error en Gemini Vision: {err_msg}")
+            errors.append(f"Gemini: {err_msg}")
 
-    # ── Soporte Ollama Local (Multimodal / Fallback Inteligente) ────────────────
-    else:
+    # ── 3. Fallback con Ollama Local ─────────────────────────────────────────────
+    try:
         url = f"{OLLAMA_BASE_URL}/api/generate"
         payload = {
             "model": OLLAMA_MODEL,
@@ -370,27 +352,31 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
             "images": [image_base64],
             "stream": False
         }
-        
+
         async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, json=payload, timeout=60.0)
-                response.raise_for_status()
-                data = response.json()
-                response_text = data.get("response", "")
-                
+            response = await client.post(url, json=payload, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+            response_text = data.get("response", "")
+            if response_text:
                 return extract_json_block(response_text)
-            except Exception:
-                return {
-                    "is_food": True,
-                    "food_name": "Tostadas integrales con aguacate y huevo",
-                    "portion_size_g": 180.0,
-                    "meal_type": "DESAYUNO",
-                    "calories": 320.0,
-                    "carbs_g": 28.0,
-                    "glycemic_index": 45.0,
-                    "glycemic_load": 12.6,
-                    "error_message": None
-                }
+    except Exception as e:
+        err_msg = _format_httpx_error(e)
+        errors.append(f"Ollama: {err_msg}")
+
+    # ── 4. Fallback de Contingencia Estructurado (Evita 502 Bad Gateway) ───────
+    print(f"[AI Service] Todos los proveedores de escaneo fallaron: {errors}")
+    return {
+        "is_food": False,
+        "food_name": "No disponible",
+        "portion_size_g": 0.0,
+        "meal_type": "ALMUERZO",
+        "calories": 0.0,
+        "carbs_g": 0.0,
+        "glycemic_index": 0.0,
+        "glycemic_load": 0.0,
+        "error_message": "El servicio de Inteligencia Artificial no respondió a tiempo. Inténtalo de nuevo o ingresa los valores de la comida manualmente."
+    }
 
 
 
