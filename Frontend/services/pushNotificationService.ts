@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
@@ -22,7 +22,8 @@ Notifications.setNotificationHandler({
 function getProjectId(): string | undefined {
   return (
     Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId
+    Constants.easConfig?.projectId ??
+    'c48e8b6c-037d-4d4c-808b-9db285e3d8ac'
   );
 }
 
@@ -47,7 +48,9 @@ async function getLocalToken(): Promise<string | null> {
 
 async function apiPost(path: string, body: Record<string, unknown>) {
   const token = await getAccessToken();
-  if (!token) return;
+  if (!token) {
+    throw new Error('No se encontró el token de autenticación (JWT) para registrar el dispositivo.');
+  }
 
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
@@ -59,7 +62,7 @@ async function apiPost(path: string, body: Record<string, unknown>) {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Error de red' }));
+    const err = await res.json().catch(() => ({ detail: `Error HTTP ${res.status}: ${res.statusText}` }));
     throw new Error(err.detail ?? 'Error al registrar dispositivo push');
   }
 }
@@ -99,7 +102,7 @@ export async function setupNotificationChannels() {
 
 /**
  * Solicita permisos, obtiene ExpoPushToken y lo registra en el backend.
- * Solo para pacientes en dispositivos nativos. No bloquea el login si falla.
+ * Muestra alertas informativas en caso de éxito o fallo para diagnóstico.
  */
 export async function registerForPushNotifications(userRole?: string): Promise<string | null> {
   try {
@@ -107,10 +110,12 @@ export async function registerForPushNotifications(userRole?: string): Promise<s
       return null;
     }
     if (userRole && userRole !== 'PACIENTE') {
+      console.log('[Push] Omitido: El rol no es PACIENTE (rol:', userRole, ')');
       return null;
     }
     if (!Device.isDevice) {
       console.log('[Push] Se requiere un dispositivo físico para notificaciones push.');
+      Alert.alert('Notificaciones', 'Se requiere un dispositivo físico real para recibir notificaciones push.');
       return null;
     }
 
@@ -124,18 +129,28 @@ export async function registerForPushNotifications(userRole?: string): Promise<s
     }
     if (finalStatus !== 'granted') {
       console.log('[Push] Permiso de notificaciones denegado.');
+      Alert.alert(
+        'Permiso Denegado',
+        'No se concedieron permisos de notificación en el teléfono. Actívalos en Ajustes > Aplicaciones.'
+      );
       return null;
     }
 
     const projectId = getProjectId();
+    console.log('[Push] Obteniendo ExpoPushToken con projectId:', projectId);
+
     const tokenResponse = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined,
     );
     const expoPushToken = tokenResponse.data;
-    if (!expoPushToken) return null;
+    if (!expoPushToken) {
+      Alert.alert('Error Push', 'No se pudo obtener el token de Expo desde el dispositivo.');
+      return null;
+    }
 
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Caracas';
 
+    console.log('[Push] Registrando en backend:', `${API_URL}/notifications/patient/device`);
     await apiPost('/notifications/patient/device', {
       expo_push_token: expoPushToken,
       platform: Platform.OS,
@@ -145,9 +160,17 @@ export async function registerForPushNotifications(userRole?: string): Promise<s
 
     await storeLocalToken(expoPushToken);
     console.log('[Push] Dispositivo registrado:', expoPushToken);
+    Alert.alert(
+      '¡Notificaciones Conectadas!',
+      `Teléfono registrado exitosamente en el servidor.\n\nServidor: ${API_URL}\n\nToken: ${expoPushToken.substring(0, 25)}...`
+    );
     return expoPushToken;
-  } catch (err) {
+  } catch (err: any) {
     console.log('[Push] No se pudo registrar el dispositivo:', err);
+    Alert.alert(
+      'Fallo al registrar Notificaciones',
+      `No se pudo registrar el teléfono.\n\nServidor: ${API_URL}\n\nDetalle: ${err?.message || String(err)}`
+    );
     return null;
   }
 }
