@@ -25,6 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DoctorClinicalReports from '../../components/doctor/DoctorClinicalReports';
 import AdminDashboard from '../../components/admin/AdminDashboard';
 import type { AdminRole } from '../../types/admin';
+import { syncLocalMealReminders, testLocalNotificationNow } from '../../services/pushNotificationService';
 
 const { width } = Dimensions.get('window');
 
@@ -197,6 +198,9 @@ export default function DashboardScreen() {
       };
 
       if (user?.role === 'PACIENTE') {
+        // Sincronizar automáticamente recordatorios locales desde la BD
+        void syncLocalMealReminders();
+
         // Cargar historial de comidas
         const resIntakes = await fetch(`${API_URL}/dashboard/patient/intakes`, { headers });
         if (resIntakes.ok) {
@@ -1196,6 +1200,31 @@ export default function DashboardScreen() {
         <Text style={[styles.doctorIndicatorText, doctorName ? {} : { color: COLORS.error }]}>
           {doctorName ? `Médico de Cabecera: ${doctorName}` : 'Sin Médico de Cabecera Asignado'}
         </Text>
+      </View>
+
+      {/* Indicador y Control de Recordatorios de Comida */}
+      <View style={[styles.doctorIndicator, { borderColor: COLORS.accent, marginBottom: 12, backgroundColor: COLORS.surface }]}>
+        <Ionicons name="alarm" size={16} color={COLORS.accent} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.doctorIndicatorText, { fontWeight: '700' }]}>
+            Recordatorios de Comidas Activos
+          </Text>
+          <Text style={{ fontSize: 10, color: COLORS.textMuted }}>
+            Sincronizados con el horario fijado por tu médico
+          </Text>
+        </View>
+        <TouchableOpacity
+          onPress={() => syncLocalMealReminders(true)}
+          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: `${COLORS.accent}20` }}
+        >
+          <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.accent }}>Ver Horarios</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => testLocalNotificationNow()}
+          style={{ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: `${COLORS.purple}20`, marginLeft: 6 }}
+        >
+          <Ionicons name="notifications" size={14} color={COLORS.purple} />
+        </TouchableOpacity>
       </View>
 
       {/* Banner / Card para Completar Perfil Clínico */}
