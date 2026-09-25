@@ -146,6 +146,15 @@ export default function DashboardScreen() {
   });
   const [submittingIncident, setSubmittingIncident] = useState(false);
 
+  // Estados de errores de campo para feedback visual inmediato (resalta input en rojo y muestra texto rojo abajo)
+  const [glucoseInputError, setGlucoseInputError] = useState('');
+  const [anthroErrors, setAnthroErrors] = useState<{ weight?: string; height?: string; general?: string }>({});
+  const [medErrors, setMedErrors] = useState<{ name?: string; dosage?: string; general?: string }>({});
+  const [activityErrors, setActivityErrors] = useState<{ type?: string; duration?: string; general?: string }>({});
+  const [intakeErrors, setIntakeErrors] = useState<{ foodName?: string; portion?: string; general?: string }>({});
+  const [profileErrors, setProfileErrors] = useState<{ weight_kg?: string; height_cm?: string; last_hba1c?: string; diagnosis_year?: string; date_of_birth?: string; general?: string }>({});
+  const [incidentError, setIncidentError] = useState('');
+
   // Chat IA
   const [chatPrompt, setChatPrompt] = useState('');
   const [chatResponse, setChatResponse] = useState('');
@@ -299,38 +308,37 @@ export default function DashboardScreen() {
   const handleSavePatientProfile = async () => {
     setError('');
     setSuccessMsg('');
+    setProfileErrors({});
+
+    const newErrors: { weight_kg?: string; height_cm?: string; last_hba1c?: string; diagnosis_year?: string; date_of_birth?: string; general?: string } = {};
 
     // Validaciones de Formato y Rango
     if (profileForm.date_of_birth) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       const cleanDate = profileForm.date_of_birth.trim().replace(/ /g, '-').replace(/\//g, '-');
       if (!dateRegex.test(cleanDate)) {
-        setError('Ingresa la fecha de nacimiento en formato AAAA-MM-DD (ej: 1990-01-01)');
-        return;
+        newErrors.date_of_birth = 'Formato AAAA-MM-DD (ej: 1990-01-01)';
       }
     }
 
     if (profileForm.weight_kg) {
       const w = Number(profileForm.weight_kg);
       if (isNaN(w) || w < 20 || w > 350) {
-        setError('El peso debe ser un número válido entre 20 kg y 350 kg');
-        return;
+        newErrors.weight_kg = 'Ingresa un peso válido entre 20 y 350 kg';
       }
     }
 
     if (profileForm.height_cm) {
       const h = Number(profileForm.height_cm);
       if (isNaN(h) || h < 50 || h > 260) {
-        setError('La estatura debe ser un número válido entre 50 cm y 260 cm');
-        return;
+        newErrors.height_cm = 'Ingresa una estatura válida entre 50 y 260 cm';
       }
     }
 
     if (profileForm.last_hba1c) {
       const hba = Number(profileForm.last_hba1c);
       if (isNaN(hba) || hba < 3.0 || hba > 20.0) {
-        setError('La HbA1c debe ser un número válido entre 3.0% y 20.0%');
-        return;
+        newErrors.last_hba1c = 'Ingresa una HbA1c válida entre 3.0% y 20.0%';
       }
     }
 
@@ -338,9 +346,13 @@ export default function DashboardScreen() {
       const yr = Number(profileForm.diagnosis_year);
       const currentYear = new Date().getFullYear();
       if (isNaN(yr) || yr < 1920 || yr > currentYear) {
-        setError(`El año de diagnóstico debe estar entre 1920 y ${currentYear}`);
-        return;
+        newErrors.diagnosis_year = `Año entre 1920 y ${currentYear}`;
       }
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setProfileErrors(newErrors);
+      return;
     }
 
     setLoading(true);
@@ -377,9 +389,11 @@ export default function DashboardScreen() {
       }
 
       setSuccessMsg('¡Perfil clínico guardado correctamente!');
+      setProfileErrors({});
       setProfileModalVisible(false);
       await loadRoleData();
     } catch (err: any) {
+      setProfileErrors({ general: err.message || 'Error al guardar el perfil.' });
       setError(err.message || 'Error al guardar el perfil.');
     } finally {
       setLoading(false);
@@ -492,9 +506,20 @@ export default function DashboardScreen() {
   // A. Paciente: Registrar Comida con Hora Exacta
   const handleRegisterIntake = async () => {
     setError(''); setSuccessMsg('');
-    if (!foodName.trim()) { setError('Ingresa el nombre del alimento'); return; }
+    const newErrors: { foodName?: string; portion?: string; general?: string } = {};
+    if (!foodName.trim()) {
+      newErrors.foodName = 'Ingresa el nombre del alimento consumido';
+    }
     const pVal = Number(portion);
-    if (!portion || isNaN(pVal) || pVal <= 0 || pVal > 99999) { setError('Ingresa una porción válida en gramos (1g - 99,999g)'); return; }
+    if (!portion || isNaN(pVal) || pVal <= 0 || pVal > 99999) {
+      newErrors.portion = 'Ingresa una porción válida en gramos (1g - 99,999g)';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setIntakeErrors(newErrors);
+      return;
+    }
+    setIntakeErrors({});
 
     setLoading(true);
     try {
@@ -545,9 +570,12 @@ export default function DashboardScreen() {
       setGlycemicIndex('');
       setGlycemicLoad('');
       setFoodImageBase64(null);
+      setIntakeErrors({});
+      setAddIntakeModalVisible(false); // Solo cerramos el modal tras guardar exitosamente
       setSuccessMsg('Comida registrada exitosamente.');
       loadRoleData();
     } catch (err: any) {
+      setIntakeErrors({ general: err.message ?? 'Error de conexión' });
       setError(err.message ?? 'Error de conexión');
     } finally {
       setLoading(false);
@@ -559,10 +587,11 @@ export default function DashboardScreen() {
   const handleRegisterGlucose = async () => {
     setError(''); setSuccessMsg('');
     const val = Number(glucoseLevelInput);
-    if (isNaN(val) || val < 20 || val > 600) {
-      setError('Ingresa un nivel de glucosa válido entre 20 mg/dL y 600 mg/dL');
+    if (!glucoseLevelInput.trim() || isNaN(val) || val < 20 || val > 600) {
+      setGlucoseInputError('Ingresa un nivel de glucosa válido entre 20 mg/dL y 600 mg/dL');
       return;
     }
+    setGlucoseInputError('');
     setLoading(true);
     try {
       const token = await getAccessToken();
@@ -582,9 +611,11 @@ export default function DashboardScreen() {
         throw new Error(errData.detail ?? 'Error al registrar glucemia');
       }
       setGlucoseLevelInput('');
+      setGlucoseInputError('');
       setSuccessMsg('Medición de glucemia capilar registrada correctamente.');
       loadRoleData();
     } catch (err: any) {
+      setGlucoseInputError(err.message || 'Error de conexión');
       setError(err.message || 'Error de conexión');
     } finally {
       setLoading(false);
@@ -593,10 +624,20 @@ export default function DashboardScreen() {
 
   const handleRegisterAnthropometric = async () => {
     setError(''); setSuccessMsg('');
+    const newAnthroErrors: { weight?: string; height?: string } = {};
     const w = Number(anthroWeightInput);
     const h = Number(anthroHeightInput);
-    if (isNaN(w) || w < 20 || w > 350) { setError('Peso inválido (20 - 350 kg)'); return; }
-    if (isNaN(h) || h < 50 || h > 260) { setError('Estatura inválida (50 - 260 cm)'); return; }
+    if (!anthroWeightInput.trim() || isNaN(w) || w < 20 || w > 350) {
+      newAnthroErrors.weight = 'Ingresa un peso válido entre 20 y 350 kg';
+    }
+    if (!anthroHeightInput.trim() || isNaN(h) || h < 50 || h > 260) {
+      newAnthroErrors.height = 'Ingresa una estatura válida entre 50 y 260 cm';
+    }
+    if (Object.keys(newAnthroErrors).length > 0) {
+      setAnthroErrors(newAnthroErrors);
+      return;
+    }
+    setAnthroErrors({});
     setLoading(true);
     try {
       const token = await getAccessToken();
@@ -616,6 +657,7 @@ export default function DashboardScreen() {
         throw new Error(errData.detail ?? 'Error al registrar antropometría');
       }
       setAnthroWeightInput(''); setAnthroHeightInput('');
+      setAnthroErrors({});
       setSuccessMsg('Peso, estatura e IMC computados exitosamente.');
       loadRoleData();
     } catch (err: any) {
@@ -627,8 +669,18 @@ export default function DashboardScreen() {
 
   const handleRegisterMedication = async () => {
     setError(''); setSuccessMsg('');
-    if (!medNameInput.trim()) { setError('Ingresa el nombre del medicamento'); return; }
-    if (!medDosageInput.trim()) { setError('Ingresa la dosis administrada (ej. 850 mg)'); return; }
+    const newMedErrors: { name?: string; dosage?: string } = {};
+    if (!medNameInput.trim()) {
+      newMedErrors.name = 'Ingresa el nombre del fármaco o medicamento';
+    }
+    if (!medDosageInput.trim()) {
+      newMedErrors.dosage = 'Ingresa la dosis administrada (ej. 850 mg)';
+    }
+    if (Object.keys(newMedErrors).length > 0) {
+      setMedErrors(newMedErrors);
+      return;
+    }
+    setMedErrors({});
     setLoading(true);
     try {
       const token = await getAccessToken();
@@ -648,6 +700,7 @@ export default function DashboardScreen() {
         throw new Error(errData.detail ?? 'Error al registrar medicamento');
       }
       setMedNameInput(''); setMedDosageInput('');
+      setMedErrors({});
       setSuccessMsg('Medicamento administrado registrado en la bitácora.');
       loadRoleData();
     } catch (err: any) {
@@ -659,9 +712,19 @@ export default function DashboardScreen() {
 
   const handleRegisterPhysicalActivity = async () => {
     setError(''); setSuccessMsg('');
-    if (!activityTypeInput.trim()) { setError('Ingresa el tipo de actividad física'); return; }
+    const newActErrors: { type?: string; duration?: string } = {};
+    if (!activityTypeInput.trim()) {
+      newActErrors.type = 'Ingresa el tipo de actividad física realizada';
+    }
     const mins = Number(activityDurationInput);
-    if (isNaN(mins) || mins < 1 || mins > 1440) { setError('Duración inválida (1 - 1440 min)'); return; }
+    if (!activityDurationInput.trim() || isNaN(mins) || mins < 1 || mins > 1440) {
+      newActErrors.duration = 'Ingresa una duración válida entre 1 y 1440 minutos';
+    }
+    if (Object.keys(newActErrors).length > 0) {
+      setActivityErrors(newActErrors);
+      return;
+    }
+    setActivityErrors({});
     setLoading(true);
     try {
       const token = await getAccessToken();
@@ -681,9 +744,11 @@ export default function DashboardScreen() {
         throw new Error(errData.detail ?? 'Error al registrar actividad física');
       }
       setActivityTypeInput(''); setActivityDurationInput('');
-      setSuccessMsg('Actividad física registrada en la bitácora.');
+      setActivityErrors({});
+      setSuccessMsg('Actividad física registrada correctamente.');
       loadRoleData();
     } catch (err: any) {
+      setActivityErrors({ general: err.message || 'Error de conexión' });
       setError(err.message || 'Error de conexión');
     } finally {
       setLoading(false);
@@ -1005,9 +1070,10 @@ export default function DashboardScreen() {
   // E. Paciente: Registrar Incidencia / Malestar
   const handleSubmitIncident = async () => {
     if (!incidentForm.description.trim()) {
-      Alert.alert('Error', 'Por favor describe el malestar o dolor.');
+      setIncidentError('Por favor describe tu malestar o síntomas con precisión.');
       return;
     }
+    setIncidentError('');
     setSubmittingIncident(true);
     try {
       const token = await getAccessToken();
@@ -1027,13 +1093,16 @@ export default function DashboardScreen() {
       if (res.ok) {
         Alert.alert('Éxito', 'Incidencia y consulta médica registradas correctamente.');
         setIncidentModalVisible(false);
+        setIncidentError('');
         setIncidentForm({ description: '', pain_level: 5, doctor_question: '' });
         loadRoleData();
       } else {
         const errData = await res.json();
+        setIncidentError(errData.detail || 'No se pudo registrar la incidencia.');
         Alert.alert('Error', errData.detail || 'No se pudo registrar la incidencia.');
       }
     } catch (err) {
+      setIncidentError('Hubo un error de conexión con el servidor.');
       Alert.alert('Error', 'Hubo un error de conexión con el servidor.');
     } finally {
       setSubmittingIncident(false);
@@ -1200,31 +1269,6 @@ export default function DashboardScreen() {
         <Text style={[styles.doctorIndicatorText, doctorName ? {} : { color: COLORS.error }]}>
           {doctorName ? `Médico de Cabecera: ${doctorName}` : 'Sin Médico de Cabecera Asignado'}
         </Text>
-      </View>
-
-      {/* Indicador y Control de Recordatorios de Comida */}
-      <View style={[styles.doctorIndicator, { borderColor: COLORS.accent, marginBottom: 12, backgroundColor: COLORS.surface }]}>
-        <Ionicons name="alarm" size={16} color={COLORS.accent} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.doctorIndicatorText, { fontWeight: '700' }]}>
-            Recordatorios de Comidas Activos
-          </Text>
-          <Text style={{ fontSize: 10, color: COLORS.textMuted }}>
-            Sincronizados con el horario fijado por tu médico
-          </Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => syncLocalMealReminders(true)}
-          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: `${COLORS.accent}20` }}
-        >
-          <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.accent }}>Ver Horarios</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => testLocalNotificationNow()}
-          style={{ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: `${COLORS.purple}20`, marginLeft: 6 }}
-        >
-          <Ionicons name="notifications" size={14} color={COLORS.purple} />
-        </TouchableOpacity>
       </View>
 
       {/* Banner / Card para Completar Perfil Clínico */}
@@ -1583,20 +1627,35 @@ export default function DashboardScreen() {
           {activeMetabolicTab === 'GLUCOSE' && (
             <View>
               <Text style={styles.inputLabel}>Medición de Glucemia Capilar (mg/dL)</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <View style={[
+                { flexDirection: 'row', alignItems: 'center', marginBottom: glucoseInputError ? 4 : 12, borderRadius: 12, borderWidth: glucoseInputError ? 1.5 : 0, borderColor: glucoseInputError ? '#EF4444' : 'transparent' }
+              ]}>
                 <TextInput
-                  style={[styles.textInput, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                  style={[
+                    styles.textInput, 
+                    { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                    glucoseInputError ? { borderColor: '#EF4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                  ]}
                   placeholder="Ej. 110"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="number-pad"
                   maxLength={3}
                   value={glucoseLevelInput}
-                  onChangeText={(val) => setGlucoseLevelInput(val.replace(/[^0-9]/g, ''))}
+                  onChangeText={(val) => {
+                    setGlucoseLevelInput(val.replace(/[^0-9]/g, ''));
+                    if (glucoseInputError) setGlucoseInputError('');
+                  }}
                 />
                 <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 12, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                   <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>mg/dL</Text>
                 </View>
               </View>
+              {glucoseInputError ? (
+                <View style={[styles.fieldErrorRow, { marginBottom: 10 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.fieldErrorText}>{glucoseInputError}</Text>
+                </View>
+              ) : null}
 
               <Text style={styles.inputLabel}>Contexto de la Medición</Text>
               <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -1676,25 +1735,49 @@ export default function DashboardScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inputLabel}>Peso (kg)</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={[
+                      styles.textInput,
+                      anthroErrors.weight ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                    ]}
                     placeholder="70.5"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="decimal-pad"
                     value={anthroWeightInput}
-                    onChangeText={(val) => setAnthroWeightInput(val.replace(/[^0-9.]/g, ''))}
+                    onChangeText={(val) => {
+                      setAnthroWeightInput(val.replace(/[^0-9.]/g, ''));
+                      if (anthroErrors.weight) setAnthroErrors(prev => ({ ...prev, weight: undefined }));
+                    }}
                   />
+                  {anthroErrors.weight ? (
+                    <View style={styles.fieldErrorRow}>
+                      <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                      <Text style={styles.fieldErrorText}>{anthroErrors.weight}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inputLabel}>Estatura (cm)</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={[
+                      styles.textInput,
+                      anthroErrors.height ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                    ]}
                     placeholder="170"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="number-pad"
                     value={anthroHeightInput}
-                    onChangeText={(val) => setAnthroHeightInput(val.replace(/[^0-9]/g, ''))}
+                    onChangeText={(val) => {
+                      setAnthroHeightInput(val.replace(/[^0-9]/g, ''));
+                      if (anthroErrors.height) setAnthroErrors(prev => ({ ...prev, height: undefined }));
+                    }}
                   />
+                  {anthroErrors.height ? (
+                    <View style={styles.fieldErrorRow}>
+                      <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                      <Text style={styles.fieldErrorText}>{anthroErrors.height}</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
 
@@ -1757,21 +1840,47 @@ export default function DashboardScreen() {
             <View>
               <Text style={styles.inputLabel}>Nombre del Fármaco o Medicamento</Text>
               <TextInput
-                style={[styles.textInput, { marginBottom: 10 }]}
+                style={[
+                  styles.textInput, 
+                  { marginBottom: medErrors.name ? 4 : 10 },
+                  medErrors.name ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                ]}
                 placeholder="Ej. Metformina 850 mg"
                 placeholderTextColor={COLORS.textMuted}
                 value={medNameInput}
-                onChangeText={setMedNameInput}
+                onChangeText={(val) => {
+                  setMedNameInput(val);
+                  if (medErrors.name) setMedErrors(prev => ({ ...prev, name: undefined }));
+                }}
               />
+              {medErrors.name ? (
+                <View style={[styles.fieldErrorRow, { marginBottom: 10 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.fieldErrorText}>{medErrors.name}</Text>
+                </View>
+              ) : null}
 
               <Text style={styles.inputLabel}>Dosis e Indicación</Text>
               <TextInput
-                style={[styles.textInput, { marginBottom: 12 }]}
+                style={[
+                  styles.textInput, 
+                  { marginBottom: medErrors.dosage ? 4 : 12 },
+                  medErrors.dosage ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                ]}
                 placeholder="Ej. 1 tableta con el almuerzo"
                 placeholderTextColor={COLORS.textMuted}
                 value={medDosageInput}
-                onChangeText={setMedDosageInput}
+                onChangeText={(val) => {
+                  setMedDosageInput(val);
+                  if (medErrors.dosage) setMedErrors(prev => ({ ...prev, dosage: undefined }));
+                }}
               />
+              {medErrors.dosage ? (
+                <View style={[styles.fieldErrorRow, { marginBottom: 12 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.fieldErrorText}>{medErrors.dosage}</Text>
+                </View>
+              ) : null}
 
               <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: '#3B82F6' }]} onPress={handleRegisterMedication}>
                 <Text style={styles.primaryBtnText}>Registrar Fármaco Administrado</Text>
@@ -1804,28 +1913,56 @@ export default function DashboardScreen() {
             <View>
               <Text style={styles.inputLabel}>Tipo de Actividad Física</Text>
               <TextInput
-                style={[styles.textInput, { marginBottom: 10 }]}
+                style={[
+                  styles.textInput, 
+                  { marginBottom: activityErrors.type ? 4 : 10 },
+                  activityErrors.type ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                ]}
                 placeholder="Ej. Caminata a paso ligero, Natación, Ciclismo"
                 placeholderTextColor={COLORS.textMuted}
                 value={activityTypeInput}
-                onChangeText={setActivityTypeInput}
+                onChangeText={(val) => {
+                  setActivityTypeInput(val);
+                  if (activityErrors.type) setActivityErrors(prev => ({ ...prev, type: undefined }));
+                }}
               />
+              {activityErrors.type ? (
+                <View style={[styles.fieldErrorRow, { marginBottom: 10 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.fieldErrorText}>{activityErrors.type}</Text>
+                </View>
+              ) : null}
 
               <Text style={styles.inputLabel}>Tiempo Dedicado (Minutos)</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <View style={[
+                { flexDirection: 'row', alignItems: 'center', marginBottom: activityErrors.duration ? 4 : 12, borderRadius: 12, borderWidth: activityErrors.duration ? 1.5 : 0, borderColor: activityErrors.duration ? '#EF4444' : 'transparent' }
+              ]}>
                 <TextInput
-                  style={[styles.textInput, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                  style={[
+                    styles.textInput, 
+                    { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                    activityErrors.duration ? { borderColor: '#EF4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                  ]}
                   placeholder="Ej. 30"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="number-pad"
                   maxLength={4}
                   value={activityDurationInput}
-                  onChangeText={(val) => setActivityDurationInput(val.replace(/[^0-9]/g, ''))}
+                  onChangeText={(val) => {
+                    setActivityDurationInput(val.replace(/[^0-9]/g, ''));
+                    if (activityErrors.duration) setActivityErrors(prev => ({ ...prev, duration: undefined }));
+                  }}
                 />
                 <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 12, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                   <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>min</Text>
                 </View>
               </View>
+              {activityErrors.duration ? (
+                <View style={[styles.fieldErrorRow, { marginBottom: 12 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={styles.fieldErrorText}>{activityErrors.duration}</Text>
+                </View>
+              ) : null}
 
               <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: '#8B5CF6' }]} onPress={handleRegisterPhysicalActivity}>
                 <Text style={styles.primaryBtnText}>Registrar Actividad Física</Text>
@@ -1844,7 +1981,7 @@ export default function DashboardScreen() {
                         <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{actLog.duration_minutes} minutos dedicados</Text>
                       </View>
                       <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                        {new Date(actLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                        {new Date(actLog.recorded_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                       </Text>
                     </View>
                   ))}
@@ -2244,6 +2381,7 @@ export default function DashboardScreen() {
         visible={historyDrawerVisible}
         animationType="slide"
         transparent={true}
+        statusBarTranslucent={true}
         onRequestClose={() => setHistoryDrawerVisible(false)}
       >
         <View style={styles.modalOverlay}>
@@ -3181,13 +3319,18 @@ export default function DashboardScreen() {
         visible={incidentModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setIncidentModalVisible(false)}
+        statusBarTranslucent={true}
+        onRequestClose={() => {
+          setIncidentError('');
+          setIncidentModalVisible(false);
+        }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-          <View style={[styles.modalContent, { height: '75%' }]}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleRow}>
                 <Ionicons name="warning" size={22} color="#FF6B6B" />
@@ -3195,7 +3338,10 @@ export default function DashboardScreen() {
               </View>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
-                onPress={() => setIncidentModalVisible(false)}
+                onPress={() => {
+                  setIncidentError('');
+                  setIncidentModalVisible(false);
+                }}
               >
                 <Ionicons name="close" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
@@ -3205,7 +3351,8 @@ export default function DashboardScreen() {
               style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 24 }}
+              automaticallyAdjustKeyboardInsets={true}
+              contentContainerStyle={{ paddingBottom: 40 }}
             >
               <Text style={styles.cardSubtitle}>
                 Describe tu malestar con la mayor precisión posible. Tu médico recibirá un aviso de inmediato.
@@ -3214,14 +3361,27 @@ export default function DashboardScreen() {
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputLabel}>¿Qué malestar sientes?</Text>
                 <TextInput
-                  style={[styles.textInput, styles.textArea]}
+                  style={[
+                    styles.textInput, 
+                    styles.textArea,
+                    incidentError ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                  ]}
                   placeholder="Ej. Fuerte dolor de cabeza localizado, mareos al levantarme, náuseas..."
                   placeholderTextColor={COLORS.textMuted}
                   multiline
                   numberOfLines={3}
                   value={incidentForm.description}
-                  onChangeText={(val) => setIncidentForm(prev => ({ ...prev, description: val }))}
+                  onChangeText={(val) => {
+                    setIncidentForm(prev => ({ ...prev, description: val }));
+                    if (incidentError) setIncidentError('');
+                  }}
                 />
+                {incidentError ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{incidentError}</Text>
+                  </View>
+                ) : null}
               </View>
 
               <View style={styles.inputWrapper}>
@@ -3269,7 +3429,7 @@ export default function DashboardScreen() {
                 <ActivityIndicator color="#FF6B6B" size="small" style={{ marginVertical: 12 }} />
               ) : (
                 <TouchableOpacity 
-                  style={[styles.primaryBtn, { backgroundColor: '#FF6B6B' }]} 
+                  style={[styles.primaryBtn, { backgroundColor: '#FF6B6B', marginTop: 10 }]} 
                   onPress={handleSubmitIncident}
                 >
                   <Text style={styles.primaryBtnText}>Enviar Reporte Médico</Text>
@@ -3285,13 +3445,18 @@ export default function DashboardScreen() {
         visible={profileModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setProfileModalVisible(false)}
+        statusBarTranslucent={true}
+        onRequestClose={() => {
+          setProfileErrors({});
+          setProfileModalVisible(false);
+        }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-          <View style={[styles.modalContent, { height: '85%' }]}>
+          <View style={[styles.modalContent, { maxHeight: '88%' }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleRow}>
                 <Ionicons name="medical" size={22} color={COLORS.accent} />
@@ -3299,7 +3464,10 @@ export default function DashboardScreen() {
               </View>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
-                onPress={() => setProfileModalVisible(false)}
+                onPress={() => {
+                  setProfileErrors({});
+                  setProfileModalVisible(false);
+                }}
               >
                 <Ionicons name="close" size={24} color={COLORS.textMuted} />
               </TouchableOpacity>
@@ -3309,6 +3477,8 @@ export default function DashboardScreen() {
               style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              contentContainerStyle={{ paddingBottom: 40 }}
             >
               <Text style={styles.cardSubtitle}>
                 Esta información clínica es confidencial y permite al médico programar pautas específicas para tu salud e inyectarlas al asistente de IA.
@@ -3323,12 +3493,15 @@ export default function DashboardScreen() {
                     value={profileForm.date_of_birth || '1990-01-01'}
                     max={new Date().toISOString().split('T')[0]}
                     min="1920-01-01"
-                    onChange={(e) => setProfileForm({ ...profileForm, date_of_birth: e.target.value })}
+                    onChange={(e) => {
+                      setProfileForm({ ...profileForm, date_of_birth: e.target.value });
+                      if (profileErrors.date_of_birth) setProfileErrors(prev => ({ ...prev, date_of_birth: undefined }));
+                    }}
                     style={{
                       backgroundColor: COLORS.card,
                       color: COLORS.text,
-                      borderColor: COLORS.border,
-                      borderWidth: '1px',
+                      borderColor: profileErrors.date_of_birth ? '#EF4444' : COLORS.border,
+                      borderWidth: profileErrors.date_of_birth ? '2px' : '1px',
                       borderRadius: '12px',
                       padding: '12px 14px',
                       fontSize: '14px',
@@ -3341,7 +3514,11 @@ export default function DashboardScreen() {
                 ) : (
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <TextInput
-                      style={[styles.textInput, { flex: 1.2, textAlign: 'center' }]}
+                      style={[
+                        styles.textInput, 
+                        { flex: 1.2, textAlign: 'center' },
+                        profileErrors.date_of_birth ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                      ]}
                       placeholder="AAAA"
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType="number-pad"
@@ -3351,11 +3528,16 @@ export default function DashboardScreen() {
                         const parts = (profileForm.date_of_birth || '1990-01-01').split('-');
                         const cleanYr = yr.replace(/[^0-9]/g, '');
                         setProfileForm({ ...profileForm, date_of_birth: `${cleanYr}-${parts[1] || '01'}-${parts[2] || '01'}` });
+                        if (profileErrors.date_of_birth) setProfileErrors(prev => ({ ...prev, date_of_birth: undefined }));
                       }}
                     />
                     <Text style={{ alignSelf: 'center', color: COLORS.textMuted, fontSize: 16 }}>/</Text>
                     <TextInput
-                      style={[styles.textInput, { flex: 1, textAlign: 'center' }]}
+                      style={[
+                        styles.textInput, 
+                        { flex: 1, textAlign: 'center' },
+                        profileErrors.date_of_birth ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                      ]}
                       placeholder="MM"
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType="number-pad"
@@ -3365,11 +3547,16 @@ export default function DashboardScreen() {
                         const parts = (profileForm.date_of_birth || '1990-01-01').split('-');
                         const cleanMo = mo.replace(/[^0-9]/g, '');
                         setProfileForm({ ...profileForm, date_of_birth: `${parts[0] || '1990'}-${cleanMo}-${parts[2] || '01'}` });
+                        if (profileErrors.date_of_birth) setProfileErrors(prev => ({ ...prev, date_of_birth: undefined }));
                       }}
                     />
                     <Text style={{ alignSelf: 'center', color: COLORS.textMuted, fontSize: 16 }}>/</Text>
                     <TextInput
-                      style={[styles.textInput, { flex: 1, textAlign: 'center' }]}
+                      style={[
+                        styles.textInput, 
+                        { flex: 1, textAlign: 'center' },
+                        profileErrors.date_of_birth ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                      ]}
                       placeholder="DD"
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType="number-pad"
@@ -3379,10 +3566,17 @@ export default function DashboardScreen() {
                         const parts = (profileForm.date_of_birth || '1990-01-01').split('-');
                         const cleanDy = dy.replace(/[^0-9]/g, '');
                         setProfileForm({ ...profileForm, date_of_birth: `${parts[0] || '1990'}-${parts[1] || '01'}-${cleanDy}` });
+                        if (profileErrors.date_of_birth) setProfileErrors(prev => ({ ...prev, date_of_birth: undefined }));
                       }}
                     />
                   </View>
                 )}
+                {profileErrors.date_of_birth ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{profileErrors.date_of_birth}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Género */}
@@ -3418,9 +3612,16 @@ export default function DashboardScreen() {
                 {/* Peso */}
                 <View style={[styles.inputWrapper, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Peso Actual</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={[
+                    { flexDirection: 'row', alignItems: 'center' },
+                    profileErrors.weight_kg ? { borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444' } : null
+                  ]}>
                     <TextInput
-                      style={[styles.textInput, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                      style={[
+                        styles.textInput, 
+                        { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                        profileErrors.weight_kg ? { borderColor: '#EF4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                      ]}
                       placeholder="78.5"
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType="decimal-pad"
@@ -3431,20 +3632,34 @@ export default function DashboardScreen() {
                         const parts = cleaned.split('.');
                         if (parts.length > 2) cleaned = `${parts[0]}.${parts.slice(1).join('')}`;
                         setProfileForm({ ...profileForm, weight_kg: cleaned });
+                        if (profileErrors.weight_kg) setProfileErrors(prev => ({ ...prev, weight_kg: undefined }));
                       }}
                     />
                     <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 10, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                       <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>kg</Text>
                     </View>
                   </View>
+                  {profileErrors.weight_kg ? (
+                    <View style={styles.fieldErrorRow}>
+                      <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                      <Text style={styles.fieldErrorText}>{profileErrors.weight_kg}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Estatura */}
                 <View style={[styles.inputWrapper, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Estatura</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={[
+                    { flexDirection: 'row', alignItems: 'center' },
+                    profileErrors.height_cm ? { borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444' } : null
+                  ]}>
                     <TextInput
-                      style={[styles.textInput, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                      style={[
+                        styles.textInput, 
+                        { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                        profileErrors.height_cm ? { borderColor: '#EF4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                      ]}
                       placeholder="172"
                       placeholderTextColor={COLORS.textMuted}
                       keyboardType="number-pad"
@@ -3453,12 +3668,19 @@ export default function DashboardScreen() {
                       onChangeText={(val) => {
                         const cleaned = val.replace(/[^0-9]/g, '');
                         setProfileForm({ ...profileForm, height_cm: cleaned });
+                        if (profileErrors.height_cm) setProfileErrors(prev => ({ ...prev, height_cm: undefined }));
                       }}
                     />
                     <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 10, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                       <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>cm</Text>
                     </View>
                   </View>
+                  {profileErrors.height_cm ? (
+                    <View style={styles.fieldErrorRow}>
+                      <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                      <Text style={styles.fieldErrorText}>{profileErrors.height_cm}</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
 
@@ -3496,7 +3718,10 @@ export default function DashboardScreen() {
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputLabel}>Año del Diagnóstico</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[
+                    styles.textInput,
+                    profileErrors.diagnosis_year ? { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                  ]}
                   placeholder="Ej: 2018"
                   placeholderTextColor={COLORS.textMuted}
                   keyboardType="number-pad"
@@ -3505,16 +3730,30 @@ export default function DashboardScreen() {
                   onChangeText={(val) => {
                     const cleaned = val.replace(/[^0-9]/g, '');
                     setProfileForm({ ...profileForm, diagnosis_year: cleaned });
+                    if (profileErrors.diagnosis_year) setProfileErrors(prev => ({ ...prev, diagnosis_year: undefined }));
                   }}
                 />
+                {profileErrors.diagnosis_year ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{profileErrors.diagnosis_year}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Último HbA1c */}
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputLabel}>Última Glicosilada (HbA1c)</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={[
+                  { flexDirection: 'row', alignItems: 'center' },
+                  profileErrors.last_hba1c ? { borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444' } : null
+                ]}>
                   <TextInput
-                    style={[styles.textInput, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                    style={[
+                      styles.textInput, 
+                      { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                      profileErrors.last_hba1c ? { borderColor: '#EF4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                    ]}
                     placeholder="Ej: 6.8"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="decimal-pad"
@@ -3525,12 +3764,19 @@ export default function DashboardScreen() {
                       const parts = cleaned.split('.');
                       if (parts.length > 2) cleaned = `${parts[0]}.${parts.slice(1).join('')}`;
                       setProfileForm({ ...profileForm, last_hba1c: cleaned });
+                      if (profileErrors.last_hba1c) setProfileErrors(prev => ({ ...prev, last_hba1c: undefined }));
                     }}
                   />
                   <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 12, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                     <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>%</Text>
                   </View>
                 </View>
+                {profileErrors.last_hba1c ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{profileErrors.last_hba1c}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Medicación */}
@@ -3615,6 +3861,13 @@ export default function DashboardScreen() {
                 />
               </View>
 
+              {profileErrors.general ? (
+                <View style={styles.modalInlineAlert}>
+                  <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                  <Text style={styles.modalInlineAlertText}>{profileErrors.general}</Text>
+                </View>
+              ) : null}
+
               <TouchableOpacity 
                 style={[styles.primaryBtn, { marginVertical: 20 }]} 
                 onPress={handleSavePatientProfile}
@@ -3631,13 +3884,18 @@ export default function DashboardScreen() {
         visible={addIntakeModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setAddIntakeModalVisible(false)}
+        statusBarTranslucent={true}
+        onRequestClose={() => {
+          setIntakeErrors({});
+          setAddIntakeModalVisible(false);
+        }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-          <View style={[styles.modalContent, { height: '70%', backgroundColor: COLORS.card }]}>
+          <View style={[styles.modalContent, { maxHeight: '88%', backgroundColor: COLORS.card }]}>
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(5, 150, 105, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
@@ -3649,13 +3907,22 @@ export default function DashboardScreen() {
               </View>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
-                onPress={() => setAddIntakeModalVisible(false)}
+                onPress={() => {
+                  setIntakeErrors({});
+                  setAddIntakeModalVisible(false);
+                }}
               >
                 <Ionicons name="close" size={22} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ marginVertical: 10 }}>
+            <ScrollView 
+              showsVerticalScrollIndicator={false} 
+              style={{ marginVertical: 10 }}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              contentContainerStyle={{ paddingBottom: 40 }}
+            >
               {/* Botón de Escaneo Inteligente IA */}
               <TouchableOpacity 
                 onPress={() => {
@@ -3747,31 +4014,60 @@ export default function DashboardScreen() {
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputLabel}>¿Qué alimento o plato consumiste?</Text>
                 <TextInput 
-                  style={[styles.textInput, { backgroundColor: COLORS.surface, borderColor: COLORS.border, color: COLORS.text }]}
+                  style={[
+                    styles.textInput, 
+                    { backgroundColor: COLORS.surface, borderColor: intakeErrors.foodName ? '#EF4444' : COLORS.border, color: COLORS.text },
+                    intakeErrors.foodName ? { borderWidth: 1.5, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                  ]}
                   placeholder="Ej. Pollo a la plancha con ensalada de pepino"
                   placeholderTextColor={COLORS.textMuted}
                   value={foodName}
-                  onChangeText={setFoodName}
+                  onChangeText={(val) => {
+                    setFoodName(val);
+                    if (intakeErrors.foodName) setIntakeErrors(prev => ({ ...prev, foodName: undefined }));
+                  }}
                 />
+                {intakeErrors.foodName ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{intakeErrors.foodName}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Input Porción en Gramos */}
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputLabel}>Porción aproximada (Gramos)</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={[
+                  { flexDirection: 'row', alignItems: 'center' },
+                  intakeErrors.portion ? { borderRadius: 12, borderWidth: 1.5, borderColor: '#EF4444' } : null
+                ]}>
                   <TextInput 
-                    style={[styles.textInput, { backgroundColor: COLORS.surface, borderColor: COLORS.border, color: COLORS.text, flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                    style={[
+                      styles.textInput, 
+                      { backgroundColor: COLORS.surface, borderColor: intakeErrors.portion ? '#EF4444' : COLORS.border, color: COLORS.text, flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+                      intakeErrors.portion ? { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' } : null
+                    ]}
                     placeholder="Ej. 200"
                     placeholderTextColor={COLORS.textMuted}
                     keyboardType="number-pad"
                     maxLength={5}
                     value={portion}
-                    onChangeText={(val) => setPortion(val.replace(/[^0-9]/g, ''))}
+                    onChangeText={(val) => {
+                      setPortion(val.replace(/[^0-9]/g, ''));
+                      if (intakeErrors.portion) setIntakeErrors(prev => ({ ...prev, portion: undefined }));
+                    }}
                   />
                   <View style={{ backgroundColor: COLORS.border, paddingHorizontal: 12, height: 48, justifyContent: 'center', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}>
                     <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.textMuted }}>g</Text>
                   </View>
                 </View>
+                {intakeErrors.portion ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={styles.fieldErrorText}>{intakeErrors.portion}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Valores nutricionales de la porción (IA o manual) */}
@@ -3877,7 +4173,6 @@ export default function DashboardScreen() {
               <TouchableOpacity 
                 style={[styles.primaryBtn, { marginTop: 10 }]} 
                 onPress={() => {
-                  setAddIntakeModalVisible(false);
                   handleRegisterIntake();
                 }}
               >
@@ -3893,6 +4188,7 @@ export default function DashboardScreen() {
         visible={scanningImage}
         transparent={true}
         animationType="fade"
+        statusBarTranslucent={true}
         onRequestClose={() => {}}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
@@ -3916,6 +4212,7 @@ export default function DashboardScreen() {
         visible={!!selectedFoodPhoto}
         transparent={true}
         animationType="slide"
+        statusBarTranslucent={true}
         onRequestClose={() => setSelectedFoodPhoto(null)}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
@@ -3994,14 +4291,16 @@ export default function DashboardScreen() {
         visible={aiChatModalVisible}
         animationType="slide"
         transparent={true}
+        statusBarTranslucent={true}
         onShow={() => fetchAiSessions()}
         onRequestClose={() => setAiChatModalVisible(false)}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-          <View style={[styles.modalContent, { height: '84%', backgroundColor: COLORS.card }]}>
+          <View style={[styles.modalContent, { maxHeight: '90%', height: '84%', backgroundColor: COLORS.card }]}>
             {/* Header del Modal con Acciones de Historial */}
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
@@ -4921,5 +5220,33 @@ const getStyles = (COLORS: any, isDark: boolean) => StyleSheet.create({
     fontSize: 11,
     color: COLORS.textMuted,
     lineHeight: 14,
+  },
+  fieldErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  fieldErrorText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalInlineAlert: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  modalInlineAlertText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
 });

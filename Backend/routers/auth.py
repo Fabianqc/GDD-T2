@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
@@ -172,7 +173,15 @@ def refresh(data: RefreshRequest, db: Session = Depends(get_db)):
         )
 
     # Obtener usuario
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identificador de usuario inválido",
+        )
+
+    user = db.query(models.User).filter(models.User.id == user_uuid).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

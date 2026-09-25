@@ -7,6 +7,9 @@ import {
   refreshTokens,
   getMe,
   getAccessToken,
+  saveCachedUser,
+  getCachedUser,
+  clearTokens,
   RegisterData,
 } from '../services/authService';
 import {
@@ -36,36 +39,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   /**
-   * Al montar, intenta recuperar la sesión:
-   * 1. Comprueba si hay access token en SecureStore
-   * 2. Llama a /auth/me para validarlo
-   * 3. Si falla, intenta rotar tokens con refreshTokens()
-   * 4. Si sigue fallando, limpia sesión
+   * Al montar, recupera la sesión persistente del usuario:
+   * 1. Carga usuario en caché para respuesta instantánea (evita saltos a login).
+   * 2. Valida access token en segundo plano.
+   * 3. Si expiró, renueva silenciosamente con refreshTokens().
+   * 4. Si la red falla, MANTIENE la sesión abierta con el usuario en caché.
+   * 5. Solo cierra sesión si el refresh token fue explícitamente revocado/inválido.
    */
   useEffect(() => {
     const restoreSession = async () => {
       try {
+        const cached = await getCachedUser();
+        if (cached) {
+          setUser(cached);
+        }
+
         const token = await getAccessToken();
         if (!token) {
+          if (!cached) setUser(null);
           setIsLoading(false);
           return;
         }
 
-        // Intentar con access token actual
         try {
           const me = await getMe();
           setUser(me);
+          await saveCachedUser(me);
           void registerForPushNotifications(me.role);
-        } catch {
-          // Access token expirado → intentar rotate
+        } catch (authErr: any) {
+          // Si falló por token expirado, intentar rotate
           try {
             await refreshTokens();
             const me = await getMe();
             setUser(me);
+            await saveCachedUser(me);
             void registerForPushNotifications(me.role);
-          } catch {
-            // Refresh también expirado → sesión terminada
-            setUser(null);
+          } catch (refreshErr: any) {
+            const msg = String(refreshErr?.message || '').toLowerCase();
+            const isInvalidToken = msg.includes('inválido') || msg.includes('revocado') || msg.includes('expirado') || msg.includes('401') || msg.includes('403') || msg.includes('no hay refresh');
+            if (isInvalidToken) {
+              await clearTokens();
+              setUser(null);
+            } else {
+              // Error de red temporal u offline: conservar el usuario local
+              console.log('Restauración de sesión offline/red: conservando sesión local');
+            }
           }
         }
       } finally {
@@ -80,15 +98,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await apiLogin(email, password);
     const me = await getMe();
     setUser(me);
+    await saveCachedUser(me);
     void registerForPushNotifications(me.role);
   }, []);
 
   const register = useCallback(async (data: RegisterData) => {
     await apiRegister(data);
-    // Después del registro, hacer login automático
     await apiLogin(data.email, data.password);
     const me = await getMe();
     setUser(me);
+    await saveCachedUser(me);
     void registerForPushNotifications(me.role);
   }, []);
 
