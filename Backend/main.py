@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from datetime import datetime, timezone
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -98,5 +100,17 @@ def read_root():
     return {"message": "Bienvenido a la API de GDD-T2"}
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok"}
+def health_check(db: Session = Depends(get_db)):
+    db_status = "connected"
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"disconnected: {e}"
+
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "system": "GDD-T2 API",
+        "version": "1.0.0",
+        "database": db_status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

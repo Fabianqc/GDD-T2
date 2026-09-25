@@ -5,7 +5,7 @@ import os
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -115,3 +115,59 @@ def get_current_user(
             detail="Usuario no encontrado",
         )
     return user
+
+
+bearer_optional = HTTPBearer(auto_error=False)
+
+
+def get_current_user_flexible(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_optional),
+    token: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> models.User:
+    """
+    Valida el token ya sea desde cabecera 'Authorization: Bearer <token>' 
+    o desde parámetro de URL '?token=<token>' (ideal para descargas directas en navegador).
+    """
+    raw_token = None
+    if credentials and credentials.credentials:
+        raw_token = credentials.credentials
+    elif token:
+        raw_token = token.strip()
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida (cabecera Bearer o parámetro '?token=')",
+        )
+
+    payload = decode_token(raw_token)
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere un access token",
+        )
+
+    user_id: str = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sin identificador de usuario",
+        )
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identificador de usuario inválido",
+        )
+
+    user = db.query(models.User).filter(models.User.id == user_uuid).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no encontrado",
+        )
+    return user
+

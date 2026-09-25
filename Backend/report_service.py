@@ -62,9 +62,16 @@ class ClinicalReportBundle:
     notes: List[str] = field(default_factory=list)
 
 
-def require_doctor(user: models.User) -> None:
-    if user.role != models.UserRole.CUIDADOR:
-        raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Doctores/Cuidadores.")
+def require_doctor(user: models.User, patient_id: Optional[str] = None) -> None:
+    if user.role == models.UserRole.CUIDADOR:
+        return
+    if patient_id and user.role == models.UserRole.PACIENTE:
+        try:
+            if user.id == uuid_or_400(patient_id):
+                return
+        except ValueError:
+            pass
+    raise HTTPException(status_code=403, detail="Acceso denegado: Solo para Doctores o el propio paciente.")
 
 
 def get_assigned_patient_profile(db: Session, doctor: models.User, patient_id: str) -> models.PatientProfile:
@@ -72,6 +79,13 @@ def get_assigned_patient_profile(db: Session, doctor: models.User, patient_id: s
         p_uuid = uuid_or_400(patient_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="ID de paciente inválido.") from exc
+
+    # Permite al paciente acceder a su propio perfil clínico
+    if doctor.role == models.UserRole.PACIENTE and doctor.id == p_uuid:
+        profile = db.query(models.PatientProfile).filter(models.PatientProfile.user_id == p_uuid).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Perfil de paciente no encontrado.")
+        return profile
 
     profile = (
         db.query(models.PatientProfile)
@@ -440,10 +454,16 @@ def build_clinical_report(
     if not tdee_info["available"]:
         notes.append("TDEE incompleto: faltan " + ", ".join(tdee_info["missing_fields"]) + ".")
 
+    doc_display = f"{doctor_user.first_name} {doctor_user.last_name}".strip()
+    if doctor_user.role == models.UserRole.PACIENTE and profile.caregiver_id:
+        cg = db.query(models.User).filter(models.User.id == profile.caregiver_id).first()
+        if cg:
+            doc_display = f"{cg.first_name} {cg.last_name}".strip()
+
     return ClinicalReportBundle(
         patient_id=str(p_uuid),
         patient_name=f"{patient_user.first_name} {patient_user.last_name}".strip(),
-        doctor_name=f"{doctor_user.first_name} {doctor_user.last_name}".strip(),
+        doctor_name=doc_display,
         generated_at=datetime.now(),
         period=period,
         profile={

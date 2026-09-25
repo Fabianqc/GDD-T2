@@ -10,7 +10,7 @@ import io
 try:
     from .. import models
     from ..database import get_db
-    from ..auth import get_current_user
+    from ..auth import get_current_user, get_current_user_flexible
     from ..report_service import (
         require_doctor,
         get_assigned_patient_profile,
@@ -24,7 +24,7 @@ try:
 except (ImportError, ValueError):
     import models
     from database import get_db
-    from auth import get_current_user
+    from auth import get_current_user, get_current_user_flexible
     from report_service import (
         require_doctor,
         get_assigned_patient_profile,
@@ -1243,10 +1243,10 @@ def get_doctor_clinical_report(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user_flexible),
 ):
     """RF-06: Indicadores de variabilidad glucémica y balance calórico para consulta médica."""
-    require_doctor(current_user)
+    require_doctor(current_user, patient_id)
     profile = get_assigned_patient_profile(db, current_user, patient_id)
     patient_user = db.query(models.User).filter(models.User.id == profile.user_id).first()
     if not patient_user:
@@ -1265,10 +1265,10 @@ def export_doctor_clinical_report(
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user_flexible),
 ):
     """RF-06: Exporta reporte clínico en PDF o CSV."""
-    require_doctor(current_user)
+    require_doctor(current_user, patient_id)
     profile = get_assigned_patient_profile(db, current_user, patient_id)
     patient_user = db.query(models.User).filter(models.User.id == profile.user_id).first()
     if not patient_user:
