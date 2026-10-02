@@ -53,12 +53,13 @@ _migration_queries = [
     "ALTER TABLE intake_logs ADD COLUMN IF NOT EXISTS glycemic_load NUMERIC(5, 2);",
 ]
 
-for query in _migration_queries:
-    try:
-        with engine.begin() as conn:
-            conn.execute(text(query))
-    except Exception as e:
-        print(f"[Auto-migration] Warning: Failed to execute '{query}': {e}")
+if engine.dialect.name == "postgresql":
+    for query in _migration_queries:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(query))
+        except Exception as e:
+            print(f"[Auto-migration] Warning: Failed to execute '{query}': {e}")
 
 # Inicializa horarios de comida predeterminados para pacientes existentes
 try:

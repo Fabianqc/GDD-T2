@@ -6,8 +6,10 @@ module.exports = {
       script: "venv/bin/uvicorn",
       args: "main:app --host 0.0.0.0 --port 8004 --workers 2",
       interpreter: "none",
+      restart_delay: 4000,
       env: {
-        NODE_ENV: "production"
+        NODE_ENV: "production",
+        PYTHONUNBUFFERED: "1"
       }
     },
     {
@@ -18,8 +20,10 @@ module.exports = {
       interpreter: "none",
       instances: 1,
       exec_mode: "fork",
+      restart_delay: 4000,
       env: {
-        NODE_ENV: "production"
+        NODE_ENV: "production",
+        PYTHONUNBUFFERED: "1"
       }
     }
   ]
