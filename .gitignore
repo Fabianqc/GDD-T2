@@ -42,6 +42,8 @@ Thumbs.db
 
 # Misc
 *.log
+*.db
+*.db*
 envs/
 scratch/
 temp/

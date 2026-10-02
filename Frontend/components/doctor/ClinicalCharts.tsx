@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import Svg, { Rect, Polyline, Circle, Line, Text as SvgText } from 'react-native-svg';
 import type { DailyNutritionPoint, GlucoseSeriesPoint } from '../../types/clinicalReport';
+import { formatGlucoseContext } from '../../constants/theme';
 
 type ChartColors = {
   grid: string;
@@ -116,7 +117,7 @@ export function GlucoseTrendChart({
           }}
         >
           <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12 }}>
-            {sel.glucose_level} mg/dL · {sel.context}
+            {sel.glucose_level} mg/dL · {formatGlucoseContext(sel.context)}
           </Text>
           <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
             {(sel.recorded_at || '').replace('T', ' ').slice(0, 16)}

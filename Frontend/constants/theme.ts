@@ -138,3 +138,15 @@ export const Fonts = Platform.select({
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
+
+export const GLUCOSE_CONTEXT_LABELS: Record<string, string> = {
+  AYUNAS: 'Ayunas (Preprandial)',
+  ANTES_COMIDA: 'Antes de comer',
+  DESPUES_COMIDA: 'Postprandial (2h)',
+  MADRUGADA: 'Madrugada',
+};
+
+export function formatGlucoseContext(context?: string | null): string {
+  if (!context) return '';
+  return GLUCOSE_CONTEXT_LABELS[context] || context.replace(/_/g, ' ');
+}

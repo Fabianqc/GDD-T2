@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useColorScheme } from '../../hooks/use-color-scheme';
-import { Colors, ClinicalColors } from '../../constants/theme';
+import { Colors, ClinicalColors, formatGlucoseContext } from '../../constants/theme';
 import { getAccessToken } from '../../services/authService';
 import * as ImagePicker from 'expo-image-picker';
 import DoctorClinicalReports from '../../components/doctor/DoctorClinicalReports';
@@ -1711,15 +1711,27 @@ export default function DashboardScreen() {
 
                     return (
                       <View key={gLog.id || idx} style={{ backgroundColor: COLORS.bg, padding: 10, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text style={{ fontSize: 15, fontWeight: '800', color: COLORS.text }}>{gLog.glucose_level} mg/dL</Text>
-                          <View style={{ backgroundColor: badgeBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '800', color: badgeText }}>{badgeLabel}</Text>
+                        <View style={{ flex: 1, marginRight: 10 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: COLORS.text }}>
+                              {gLog.glucose_level} <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>mg/dL</Text>
+                            </Text>
+                            <View style={{ backgroundColor: badgeBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '800', color: badgeText }}>{badgeLabel}</Text>
+                            </View>
                           </View>
+                          <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 3 }} numberOfLines={1}>
+                            {formatGlucoseContext(gLog.context)}
+                          </Text>
                         </View>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                          {gLog.context} • {new Date(gLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                        </Text>
+                        <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                            {new Date(gLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>
+                            {new Date(gLog.recorded_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        </View>
                       </View>
                     );
                   })}
@@ -1821,13 +1833,15 @@ export default function DashboardScreen() {
                 <View style={{ gap: 6 }}>
                   {anthroLogs.slice(0, 5).map((aLog: any, idx: number) => (
                     <View key={aLog.id || idx} style={{ backgroundColor: COLORS.bg, padding: 10, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border }}>
-                      <View>
+                      <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{aLog.weight_kg} kg • {aLog.height_cm} cm</Text>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>IMC: {aLog.bmi} kg/m²</Text>
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>IMC: {aLog.bmi} kg/m²</Text>
                       </View>
-                      <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                        {new Date(aLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                      </Text>
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                          {new Date(aLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                        </Text>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -1894,13 +1908,18 @@ export default function DashboardScreen() {
                 <View style={{ gap: 6 }}>
                   {medLogs.slice(0, 5).map((mLog: any, idx: number) => (
                     <View key={mLog.id || idx} style={{ backgroundColor: COLORS.bg, padding: 10, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border }}>
-                      <View>
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{mLog.medication_name}</Text>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>Dosis: {mLog.dosage}</Text>
+                      <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }} numberOfLines={1}>{mLog.medication_name}</Text>
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>Dosis: {mLog.dosage}</Text>
                       </View>
-                      <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                        {new Date(mLog.taken_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                          {new Date(mLog.taken_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>
+                          {new Date(mLog.taken_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -1976,13 +1995,18 @@ export default function DashboardScreen() {
                 <View style={{ gap: 6 }}>
                   {activityLogs.slice(0, 5).map((actLog: any, idx: number) => (
                     <View key={actLog.id || idx} style={{ backgroundColor: COLORS.bg, padding: 10, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border }}>
-                      <View>
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{actLog.activity_type}</Text>
-                        <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{actLog.duration_minutes} minutos dedicados</Text>
+                      <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }} numberOfLines={1}>{actLog.activity_type}</Text>
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>{actLog.duration_minutes} minutos dedicados</Text>
                       </View>
-                      <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                        {new Date(actLog.recorded_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                          {new Date(actLog.recorded_at || Date.now()).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>
+                          {new Date(actLog.recorded_at || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -2157,12 +2181,14 @@ export default function DashboardScreen() {
               ) : savedMenus.map((sm: any) => (
                 <View key={sm.id} style={{ backgroundColor: COLORS.bg, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, padding: 10 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                      <Ionicons name="bookmark" size={14} color={COLORS.purple} />
-                      <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>
-                        Menú {sm.target_day === 'HOY' ? 'del Día' : 'de Mañana'}
-                      </Text>
-                      <Text style={{ fontSize: 10, color: COLORS.textMuted }}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="bookmark" size={14} color={COLORS.purple} />
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.text }}>
+                          Menú {sm.target_day === 'HOY' ? 'del Día' : 'de Mañana'}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>
                         {new Date(sm.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </Text>
                     </View>
@@ -2312,8 +2338,8 @@ export default function DashboardScreen() {
                             <Ionicons name="restaurant" size={14} color={COLORS.textMuted} />
                           </View>
                         )}
-                        <View>
-                          <Text style={styles.historyFoodName}>{item.food_name}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.historyFoodName} numberOfLines={1}>{item.food_name}</Text>
                           <Text style={styles.historyMeta}>
                             {item.meal_type} · {item.portion_size_g}g
                             {item.calories != null ? ` · ${item.calories} kcal` : ''}
@@ -2716,11 +2742,11 @@ export default function DashboardScreen() {
                         borderWidth: 1,
                         borderColor: COLORS.border,
                       }}>
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, marginRight: 10 }}>
                           <Text style={{ fontSize: 14, fontWeight: '800', color: st.color }}>
                             {gLog.glucose_level} <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>mg/dL</Text>
                           </Text>
-                          <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>{gLog.context}</Text>
+                          <Text style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>{formatGlucoseContext(gLog.context)}</Text>
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 4 }}>
                           <View style={{ backgroundColor: st.bg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
@@ -2755,7 +2781,7 @@ export default function DashboardScreen() {
                       borderWidth: 1,
                       borderColor: COLORS.border,
                     }}>
-                      <View>
+                      <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>
                           {aLog.weight_kg} kg · {aLog.height_cm} cm
                         </Text>
@@ -2821,7 +2847,7 @@ export default function DashboardScreen() {
                       borderWidth: 1,
                       borderColor: COLORS.border,
                     }}>
-                      <View>
+                      <View style={{ flex: 1, marginRight: 10 }}>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: COLORS.text }}>{actLog.activity_type}</Text>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.purple, marginTop: 2 }}>
                           {actLog.duration_minutes} min
@@ -3241,12 +3267,12 @@ export default function DashboardScreen() {
           }
         ]}
       >
-        <View style={styles.headerInfo}>
-          <Text style={[styles.welcomeUser, { color: COLORS.text, fontSize: isScrolled ? 18 : 22 }]}>
+        <View style={[styles.headerInfo, { flex: 1, marginRight: 10 }]}>
+          <Text style={[styles.welcomeUser, { color: COLORS.text, fontSize: isScrolled ? 18 : 22 }]} numberOfLines={1}>
             ¡Hola, {user?.first_name || 'Usuario'}!
           </Text>
           {!isScrolled && user?.role !== 'PACIENTE' && (
-            <Text style={[styles.roleLabel, { color: COLORS.purple }]}>
+            <Text style={[styles.roleLabel, { color: COLORS.purple }]} numberOfLines={1}>
               Rol: {user?.role === 'CUIDADOR' ? 'DOCTOR' : user?.role}
             </Text>
           )}
@@ -4547,7 +4573,7 @@ export default function DashboardScreen() {
 
 const getStyles = (COLORS: any, isDark: boolean) => StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bg },
-  scroll: { paddingBottom: 40 },
+  scroll: { paddingBottom: 100 },
 
   // Header Banner
   headerBanner: {
